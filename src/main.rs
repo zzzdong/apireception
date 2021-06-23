@@ -2,9 +2,8 @@ use futures::future::join_all;
 use tokio::net::TcpStream;
 
 mod config;
-mod server;
 mod matcher;
-mod expr;
+mod server;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:5000";
 
@@ -41,4 +40,3 @@ fn run_server() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -17,20 +17,12 @@ struct Route {
     name: String,
     uris: Vec<String>,
     upstream: Upstream,
-
-    modify_request: Option<String>,
-    modify_response: Option<String>,
-    forward_request: Option<String>,
+    matcher: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Upstream {
     name: String,
-    addrs: Vec<(String,u32)>,
+    addrs: Vec<(String, u32)>,
     strategy: String,
-}
-
-
-struct Context {
-    
 }
