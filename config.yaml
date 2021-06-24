@@ -1,0 +1,30 @@
+---
+server:
+  log_level: debug
+  http_addr: "0.0.0.0:80"
+  https_addr: "0.0.0.0:443"
+  tls_config:
+    www.example.com:
+      cert_path: example.cert
+      key_path: example.key
+routes:
+  - name: hello
+    uris:
+      - /hello
+    matcher: "Path('/hello')"
+    upstream:
+      name: upstream-001
+      addrs:
+        - - "127.0.0.1:8080"
+          - 1
+      strategy: random
+  - name: world
+    uris:
+      - /world
+    matcher: "Path('/world')"
+    upstream:
+      name: upstream-002
+      addrs:
+        - - "127.0.0.1:8090"
+          - 1
+      strategy: random
