@@ -1,19 +1,30 @@
-
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     path::{Path, PathBuf},
+    sync::{Arc, RwLock},
 };
 
+use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
+use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
+
+use crate::{
+    error::{unsupport_file, upstream_not_found, ConfigError},
+    matcher::RouteMatcher,
+    router::{PathRoute, Route},
+};
+use crate::{router::PathRouter, upstream::Upstream};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
-    pub server: Server,
-    pub routes: Vec<Route>,
+    pub server: ServerConfig,
+    pub routes: Vec<RouteConfig>,
+    pub upstreams: Vec<UpstreamConfig>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct Server {
+pub struct ServerConfig {
     pub log_level: String,
     pub http_addr: String,
     pub https_addr: String,
@@ -27,17 +38,18 @@ pub struct TlsConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct Route {
+pub struct RouteConfig {
     pub name: String,
     pub uris: Vec<String>,
+    #[serde(default)]
     pub matcher: String,
-    pub upstream: Upstream,
+    pub upstream_name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct Upstream {
+pub struct UpstreamConfig {
     pub name: String,
-    pub endpoits: Vec<Endpoint>,
+    pub endpoints: Vec<Endpoint>,
     pub strategy: String,
 }
 
@@ -48,7 +60,7 @@ pub struct Endpoint {
 }
 
 impl Config {
-    pub fn load(path: impl AsRef<Path>) -> anyhow::Result<Config> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let path = path.as_ref().clone();
         let ext = path
             .extension()
@@ -69,7 +81,7 @@ impl Config {
         Ok(cfg)
     }
 
-    pub fn dumps(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+    pub fn dumps(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         let s = serde_json::to_string(self)?;
 
         let path = path.as_ref().clone();
@@ -92,8 +104,65 @@ impl Config {
     }
 }
 
-fn unsupport_file() -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Unsupported, "file format not support")
+pub struct RuntimeConfig {
+    pub http_addr: SocketAddr,
+    pub https_addr: SocketAddr,
+    pub certificates: Arc<HashMap<DNSName, CertifiedKey>>,
+    pub shared_data: Arc<ArcSwap<SharedData>>,
+}
+
+impl RuntimeConfig {
+    pub fn new(cfg: &Config) -> Result<Self, ConfigError> {
+        let http_addr = cfg.server.http_addr.parse()?;
+        let https_addr = cfg.server.https_addr.parse()?;
+        let certificates = Arc::new(HashMap::new());
+        let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(cfg)?));
+
+        Ok(RuntimeConfig {
+            http_addr,
+            https_addr,
+            shared_data,
+            certificates,
+        })
+    }
+}
+
+pub struct SharedData {
+    pub router: PathRouter,
+    pub upstreams: HashMap<String, Arc<RwLock<Upstream>>>,
+}
+
+impl SharedData {
+    pub fn new(cfg: &Config) -> Result<Self, ConfigError> {
+        let mut upstreams: HashMap<String, Arc<RwLock<Upstream>>> = HashMap::new();
+
+        for u in &cfg.upstreams {
+            let upstream = Upstream::new(u);
+            upstreams.insert(u.name.clone(), Arc::new(RwLock::new(upstream)));
+        }
+
+        let mut router = PathRouter::new();
+
+        for r in &cfg.routes {
+            let matcher = RouteMatcher::parse(&r.matcher)?;
+
+            let upstream = upstreams
+                .get(&r.upstream_name)
+                .ok_or(upstream_not_found(&r.upstream_name))?
+                .clone();
+
+            let route = PathRoute {
+                routes: vec![Route {
+                    matcher,
+                    upstream: upstream,
+                }],
+            };
+
+            router.add(&r.uris[0], route);
+        }
+
+        Ok(SharedData { router, upstreams })
+    }
 }
 
 #[cfg(test)]
@@ -103,7 +172,7 @@ mod test {
     #[test]
     fn example_config() {
         let cfg = Config {
-            server: Server {
+            server: ServerConfig {
                 log_level: "debug".to_string(),
                 http_addr: "0.0.0.0:80".to_string(),
                 https_addr: "0.0.0.0:443".to_string(),
@@ -120,31 +189,35 @@ mod test {
             },
 
             routes: vec![
-                Route {
+                RouteConfig {
                     name: "hello".to_string(),
                     uris: vec!["/hello".to_string()],
-                    upstream: Upstream {
-                        name: "upstream-001".to_string(),
-                        endpoits: vec![Endpoint {
-                            addr: "127.0.0.1:8080".to_string(),
-                            weight: 1,
-                        }],
-                        strategy: "random".to_string(),
-                    },
-                    matcher: "Path('/hello')".to_string(),
+                    upstream_name: "upstream-001".to_string(),
+                    matcher: "".to_string(),
                 },
-                Route {
-                    name: "world".to_string(),
-                    uris: vec!["/world".to_string()],
-                    upstream: Upstream {
-                        name: "upstream-002".to_string(),
-                        endpoits: vec![Endpoint {
-                            addr: "127.0.0.1:8090".to_string(),
-                            weight: 1,
-                        }],
-                        strategy: "random".to_string(),
-                    },
-                    matcher: "Path('/world')".to_string(),
+                RouteConfig {
+                    name: "hello-to-tom".to_string(),
+                    uris: vec!["/hello".to_string()],
+                    upstream_name: "upstream-002".to_string(),
+                    matcher: "Query('name', 'tom')".to_string(),
+                },
+            ],
+            upstreams: vec![
+                UpstreamConfig {
+                    name: "upstream-001".to_string(),
+                    endpoints: vec![Endpoint {
+                        addr: "127.0.0.1:8080".to_string(),
+                        weight: 1,
+                    }],
+                    strategy: "random".to_string(),
+                },
+                UpstreamConfig {
+                    name: "upstream-002".to_string(),
+                    endpoints: vec![Endpoint {
+                        addr: "127.0.0.1:8090".to_string(),
+                        weight: 1,
+                    }],
+                    strategy: "random".to_string(),
                 },
             ],
         };

@@ -1,25 +1,58 @@
 use std::net::SocketAddr;
 
-use futures::future::join_all;
-use server::Server;
-use tokio::net::TcpStream;
-
 mod config;
+mod error;
+mod health;
 mod matcher;
-mod runtime_config;
+mod peer_addr;
+mod router;
 mod server;
+mod services;
+mod trace;
+mod upstream;
 
-const DEFAULT_ADDR: &str = "0.0.0.0:5000";
+pub use error::{Error, Result};
+
+use server::Server;
+
+use crate::config::RuntimeConfig;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    let srv = Server {};
+    match run().await {
+        Ok(_) => {
+            println!("server run done, exit...");
+        }
+        Err(e) => {
+            println!("server run error: {:?}", e);
+        }
+    }
+}
 
-    let addr = DEFAULT_ADDR.parse::<SocketAddr>().unwrap();
+async fn run() -> Result<()> {
+    let cfg = config::Config::load("config.yaml")?;
 
-    let ret = srv.run(addr).await;
+    let rtcfg = RuntimeConfig::new(&cfg)?;
 
-    println!("srv.run ret={:?}", ret);
+    let (tx, watch) = drain::channel();
+
+    let http_addr = rtcfg.http_addr.clone();
+
+    tokio::spawn(async move {
+        let srv = Server::new(rtcfg.shared_data);
+        let ret = srv.run(http_addr, watch).await;
+        tracing::debug!(?ret, "http server done");
+    });
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            println!("got ctrl_c, shutting down...")
+        }
+    }
+
+    tx.drain().await;
+
+    Ok(())
 }

@@ -1,7 +1,7 @@
 ---
 server:
   log_level: debug
-  http_addr: "0.0.0.0:80"
+  http_addr: "0.0.0.0:5000"
   https_addr: "0.0.0.0:443"
   tls_config:
     www.example.com:
@@ -11,20 +11,21 @@ routes:
   - name: hello
     uris:
       - /hello
-    matcher: "Path('/hello')"
-    upstream:
-      name: upstream-001
-      addrs:
-        - - "127.0.0.1:8080"
-          - 1
-      strategy: random
-  - name: world
+    matcher: ""
+    upstream_name: upstream-001
+  - name: hello-to-tom
     uris:
-      - /world
-    matcher: "Path('/world')"
-    upstream:
-      name: upstream-002
-      addrs:
-        - - "127.0.0.1:8090"
-          - 1
-      strategy: random
+      - /hello
+    matcher: "Query('name', 'tom')"
+    upstream_name: upstream-002
+upstreams:
+  - name: upstream-001
+    endpoints:
+      - addr: "127.0.0.1:8080"
+        weight: 1
+    strategy: random
+  - name: upstream-002
+    endpoints:
+      - addr: "127.0.0.1:8090"
+        weight: 1
+    strategy: random

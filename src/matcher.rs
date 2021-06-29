@@ -10,6 +10,8 @@ use nom::{
 use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, ops::Deref};
 
+use crate::error::MatcherParseError;
+
 #[derive(Debug)]
 pub struct ComparableRegex(Regex);
 
@@ -45,11 +47,16 @@ pub enum RouteMatcher {
     Cookie(String, String),
     And(Box<RouteMatcher>, Box<RouteMatcher>),
     Or(Box<RouteMatcher>, Box<RouteMatcher>),
+    Any,
 }
 
 impl RouteMatcher {
-    pub fn parse(i: &str) -> Result<RouteMatcher, String> {
-        let (_i, matcher) = top_level(i).map_err(|e| e.to_string())?;
+    pub fn parse(i: &str) -> Result<RouteMatcher, MatcherParseError> {
+        if i.is_empty() || i.trim().is_empty() {
+            return Ok(RouteMatcher::Any);
+        }
+
+        let (_i, matcher) = top_level(i).map_err(|e| MatcherParseError::new(e.to_string()))?;
         Ok(matcher)
     }
 
@@ -87,6 +94,7 @@ impl RouteMatcher {
                 .unwrap_or(false),
             RouteMatcher::And(lhs, rhs) => lhs.matchs(req) && rhs.matchs(req),
             RouteMatcher::Or(lhs, rhs) => lhs.matchs(req) || rhs.matchs(req),
+            Any => true,
         }
     }
 }
