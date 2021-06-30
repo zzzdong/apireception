@@ -13,11 +13,13 @@ routes:
       - /hello
     matcher: ""
     upstream_name: upstream-001
+    priority: 0
   - name: hello-to-tom
     uris:
       - /hello
     matcher: "Query('name', 'tom')"
     upstream_name: upstream-002
+    priority: 100
 upstreams:
   - name: upstream-001
     endpoints:

@@ -12,7 +12,7 @@ use std::{collections::HashMap, convert::TryFrom, ops::Deref};
 
 use crate::error::MatcherParseError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComparableRegex(Regex);
 
 impl ComparableRegex {
@@ -36,7 +36,7 @@ impl Deref for ComparableRegex {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RouteMatcher {
     Method(Method),
     Host(String),

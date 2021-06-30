@@ -3,15 +3,12 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use arc_swap::ArcSwap;
+use hyper::{Body, Request, Uri};
 use rand::{thread_rng, Rng};
 
 use crate::config::{Config, Endpoint, UpstreamConfig};
 use crate::health::Healthiness;
-
-pub struct Context<'a> {
-    pub client_addr: &'a SocketAddr,
-    pub upstream_addrs: &'a [&'a str],
-}
+use crate::http::HyperRequest;
 
 pub struct Upstream {
     pub name: String,
@@ -24,7 +21,7 @@ impl Upstream {
         let endpoints = config
             .endpoints
             .iter()
-            .map(|ep| (ep.clone(), ArcSwap::new(Arc::new(Healthiness::Heathly))))
+            .map(|ep| (ep.clone(), ArcSwap::new(Arc::new(Healthiness::Healthly))))
             .collect();
 
         let strategy = Box::new(Random::new());
@@ -35,10 +32,35 @@ impl Upstream {
             strategy,
         }
     }
+
+    pub fn heathy_endpoints<'a>(&'a self) -> Vec<&'a str> {
+        self.endpoints
+            .iter()
+            .filter(|(_, healthiness)| healthiness.load().as_ref() == &Healthiness::Healthly)
+            .map(|(ep, _)| ep.addr.as_str())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn select_upstream<'a>(&'a self, ctx: &'a Context, req: &HyperRequest) -> Uri {
+        let endpoint = self.strategy.select_upstream(ctx);
+
+        let path = req.uri().path_and_query().unwrap().clone();
+        Uri::builder()
+            .scheme("http")
+            .authority(endpoint)
+            .path_and_query(path)
+            .build()
+            .unwrap()
+    }
+}
+
+pub struct Context<'a> {
+    // pub client_addr: &'a SocketAddr,
+    pub upstream_addrs: &'a [&'a str],
 }
 
 trait LoadBalanceStrategy {
-    fn select_upstream<'a>(&'a self, context: &'a Context) -> &str;
+    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str;
     fn on_tcp_open(&mut self, endpoint: &str) {}
     fn on_tcp_close(&mut self, endpoint: &str) {}
 }
@@ -52,7 +74,7 @@ impl Random {
 }
 
 impl LoadBalanceStrategy for Random {
-    fn select_upstream<'a>(&'a self, context: &'a Context) -> &str {
+    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str {
         let index = thread_rng().gen_range(0..context.upstream_addrs.len());
 
         context.upstream_addrs[index]
@@ -72,7 +94,7 @@ impl LeastConnection {
 }
 
 impl LoadBalanceStrategy for LeastConnection {
-    fn select_upstream<'a>(&'a self, context: &'a Context) -> &str {
+    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str {
         let connections = self.connections.read().unwrap();
 
         let address_indices: Vec<usize> =

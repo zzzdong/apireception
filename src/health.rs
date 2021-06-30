@@ -12,7 +12,7 @@ pub struct HealthConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Healthiness {
-    Heathly,
+    Healthly,
     Slow(Duration),
     Unresponsive(Option<StatusCode>),
 }

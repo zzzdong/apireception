@@ -826,8 +826,7 @@ dependencies = [
 [[package]]
 name = "route-recognizer"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824172f0afccf3773c3905f5550ac94572144efe0deaf49a1f22bbca188d193e"
+source = "git+https://github.com/zzzdong/route-recognizer?branch=add-add_or_update_with#993a322be2aa4c6b7e167f74bd7c7db3f495439c"
 
 [[package]]
 name = "rustls"

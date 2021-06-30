@@ -10,6 +10,7 @@ mod server;
 mod services;
 mod trace;
 mod upstream;
+mod http;
 
 pub use error::{Error, Result};
 

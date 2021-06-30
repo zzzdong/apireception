@@ -28,3 +28,6 @@ arc-swap = "1.3"
 route-recognizer = "0.3"
 rand = "0.8"
 thiserror = "1"
+
+[patch.crates-io]
+route-recognizer = {git="https://github.com/zzzdong/route-recognizer", branch="add-add_or_update_with"}

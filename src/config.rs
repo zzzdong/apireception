@@ -6,13 +6,14 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use hyper::Client;
 use serde::{Deserialize, Serialize};
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
 use crate::{
     error::{unsupport_file, upstream_not_found, ConfigError},
     matcher::RouteMatcher,
-    router::{PathRoute, Route},
+    router::Route,
 };
 use crate::{router::PathRouter, upstream::Upstream};
 
@@ -41,9 +42,11 @@ pub struct TlsConfig {
 pub struct RouteConfig {
     pub name: String,
     pub uris: Vec<String>,
+    pub upstream_name: String,
     #[serde(default)]
     pub matcher: String,
-    pub upstream_name: String,
+    #[serde(default)]
+    pub priority: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -151,14 +154,21 @@ impl SharedData {
                 .ok_or(upstream_not_found(&r.upstream_name))?
                 .clone();
 
-            let route = PathRoute {
-                routes: vec![Route {
-                    matcher,
-                    upstream: upstream,
-                }],
+            let client = hyper::Client::builder().build_http();
+
+            let route = Route {
+                matcher,
+                upstream: upstream,
+                priority: r.priority,
+                client,
             };
 
-            router.add(&r.uris[0], route);
+            for uri in &r.uris {
+                router.add_or_update_with(uri, vec![route.clone()], |routes| {
+                    routes.push(route.clone());
+                    routes.sort_unstable_by(|a,b|{b.priority.cmp(&a.priority)})
+                });
+            }
         }
 
         Ok(SharedData { router, upstreams })
@@ -194,12 +204,14 @@ mod test {
                     uris: vec!["/hello".to_string()],
                     upstream_name: "upstream-001".to_string(),
                     matcher: "".to_string(),
+                    priority: 0,
                 },
                 RouteConfig {
                     name: "hello-to-tom".to_string(),
                     uris: vec!["/hello".to_string()],
                     upstream_name: "upstream-002".to_string(),
                     matcher: "Query('name', 'tom')".to_string(),
+                    priority: 100,
                 },
             ],
             upstreams: vec![

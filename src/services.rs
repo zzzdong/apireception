@@ -6,16 +6,13 @@ use std::{
 
 use arc_swap::ArcSwap;
 use futures::Future;
-use hyper::StatusCode;
+
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, warn};
 
-use crate::{config::SharedData, peer_addr::PeerAddr, router::Route, trace::TraceExecutor};
-
-type HyperRequest = hyper::Request<hyper::Body>;
-type HyperResponse = hyper::Response<hyper::Body>;
-type HttpServer = hyper::server::conn::Http<TraceExecutor>;
+use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse};
+use crate::{config::SharedData, peer_addr::PeerAddr, router::Route};
 
 #[derive(Clone)]
 pub struct HttpService {
@@ -44,21 +41,14 @@ impl Service<HyperRequest> for HttpService {
         Box::pin(async move {
             let resp = match shared.router.recognize(req.uri().path()) {
                 Ok(m) => {
-                    let route = m.handler();
-                    let routes: Vec<&Route> = route
-                        .routes
-                        .iter()
-                        .filter(|r| r.matcher.matchs(&req))
-                        .collect();
+                    let routes = *m.handler();
+
+                    let routes: Vec<&Route> =
+                        routes.iter().filter(|r| r.matcher.matchs(&req)).collect();
 
                     match routes.first() {
-                        Some(r) => {
-                            let resp = hyper::Response::builder()
-                                .body(hyper::Body::from(format!(
-                                    "upstream: {:?}",
-                                    r.upstream.read().unwrap().name
-                                )))
-                                .unwrap();
+                        Some(route) => {
+                            let resp = route.forward_request(req).await;
                             resp
                         }
                         None => not_found(),
@@ -70,13 +60,6 @@ impl Service<HyperRequest> for HttpService {
             Ok(resp)
         })
     }
-}
-
-fn not_found() -> HyperResponse {
-    hyper::Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(hyper::Body::from("Not Found"))
-        .unwrap()
 }
 
 #[derive(Clone, Debug)]
