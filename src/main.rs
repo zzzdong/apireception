@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 mod config;
 mod error;
 mod health;
+mod http;
 mod matcher;
 mod peer_addr;
 mod router;
@@ -10,7 +11,6 @@ mod server;
 mod services;
 mod trace;
 mod upstream;
-mod http;
 
 pub use error::{Error, Result};
 
@@ -20,7 +20,7 @@ use crate::config::RuntimeConfig;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt::SubscriberBuilder::default().init();
 
     match run().await {
         Ok(_) => {
@@ -39,7 +39,7 @@ async fn run() -> Result<()> {
 
     let (tx, watch) = drain::channel();
 
-    let http_addr = rtcfg.http_addr.clone();
+    let http_addr = rtcfg.http_addr;
 
     tokio::spawn(async move {
         let srv = Server::new(rtcfg.shared_data);

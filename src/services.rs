@@ -1,4 +1,5 @@
 use std::{
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -11,25 +12,24 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, warn};
 
-use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse};
+use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse, ResponseFuture};
 use crate::{config::SharedData, peer_addr::PeerAddr, router::Route};
 
 #[derive(Clone)]
-pub struct HttpService {
+pub struct GatewayService {
     shared_data: Arc<ArcSwap<SharedData>>,
 }
 
-impl HttpService {
+impl GatewayService {
     pub fn new(shared_data: Arc<ArcSwap<SharedData>>) -> Self {
-        HttpService { shared_data }
+        GatewayService { shared_data }
     }
 }
 
-impl Service<HyperRequest> for HttpService {
+impl Service<HyperRequest> for GatewayService {
     type Response = HyperResponse;
     type Error = crate::Error;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Future = ResponseFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -91,8 +91,7 @@ where
 {
     type Response = ();
     type Error = crate::Error;
-    type Future =
-        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+    type Future = Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -105,8 +104,12 @@ where
             drain,
         } = self.clone();
 
+        let addr = io.peer_addr().expect("can not get peer addr");
+        let info = RemoteInfo::new(addr);
+        let svc = RemoteInfoService::new(inner, info);
+
         Box::pin(async move {
-            let mut conn = server.serve_connection(io, inner);
+            let mut conn = server.serve_connection(io, svc);
             tokio::select! {
                 res = &mut conn => {
                     debug!(?res, "The client is shutting down the connection");
@@ -120,5 +123,54 @@ where
             }
             Ok(())
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RemoteInfo {
+    pub addr: SocketAddr,
+}
+
+impl RemoteInfo {
+    pub fn new(addr: SocketAddr) -> Self {
+        RemoteInfo { addr }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RemoteInfoService<S> {
+    inner: S,
+    info: RemoteInfo,
+}
+
+impl<S> RemoteInfoService<S> {
+    pub fn new(inner: S, info: RemoteInfo) -> Self {
+        RemoteInfoService { inner, info }
+    }
+}
+
+impl<S> Service<HyperRequest> for RemoteInfoService<S>
+where
+    S: Service<HyperRequest, Response = HyperResponse, Error = crate::Error>
+        + Clone
+        + Unpin
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = HyperResponse;
+    type Error = crate::Error;
+    type Future = ResponseFuture;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut req: HyperRequest) -> Self::Future {
+        let RemoteInfoService { mut inner, info } = self.clone();
+
+        req.extensions_mut().insert(info);
+
+        Box::pin(Service::call(&mut inner, req))
     }
 }

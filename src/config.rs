@@ -64,7 +64,7 @@ pub struct Endpoint {
 
 impl Config {
     pub fn load(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
-        let path = path.as_ref().clone();
+        let path = path.as_ref();
         let ext = path
             .extension()
             .and_then(|p| p.to_str())
@@ -87,11 +87,11 @@ impl Config {
     pub fn dumps(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         let s = serde_json::to_string(self)?;
 
-        let path = path.as_ref().clone();
+        let path = path.as_ref();
         let ext = path
             .extension()
             .and_then(|p| p.to_str())
-            .ok_or(unsupport_file())?;
+            .ok_or_else(|| unsupport_file())?;
 
         let contents = match ext {
             "yaml" => serde_yaml::to_string(self)?,
@@ -151,7 +151,7 @@ impl SharedData {
 
             let upstream = upstreams
                 .get(&r.upstream_name)
-                .ok_or(upstream_not_found(&r.upstream_name))?
+                .ok_or_else(|| upstream_not_found(&r.upstream_name))?
                 .clone();
 
             let client = hyper::Client::builder().build_http();
@@ -166,7 +166,7 @@ impl SharedData {
             for uri in &r.uris {
                 router.add_or_update_with(uri, vec![route.clone()], |routes| {
                     routes.push(route.clone());
-                    routes.sort_unstable_by(|a,b|{b.priority.cmp(&a.priority)})
+                    routes.sort_unstable_by(|a, b| b.priority.cmp(&a.priority))
                 });
             }
         }

@@ -3,7 +3,7 @@ use hyper::{header::HOST, Body, Method};
 use nom::{
     branch::alt,
     bytes::{complete::tag, complete::take_while},
-    combinator::{eof, map_res},
+    combinator::{eof, map_res, peek},
     sequence::{delimited, separated_pair},
     IResult,
 };
@@ -11,6 +11,8 @@ use regex::Regex;
 use std::{collections::HashMap, convert::TryFrom, ops::Deref};
 
 use crate::error::MatcherParseError;
+
+const ESCAPE_CHARS: &str = r#"\'""#;
 
 #[derive(Debug, Clone)]
 pub struct ComparableRegex(Regex);
@@ -47,13 +49,13 @@ pub enum RouteMatcher {
     Cookie(String, String),
     And(Box<RouteMatcher>, Box<RouteMatcher>),
     Or(Box<RouteMatcher>, Box<RouteMatcher>),
-    Any,
+    Empty,
 }
 
 impl RouteMatcher {
     pub fn parse(i: &str) -> Result<RouteMatcher, MatcherParseError> {
         if i.is_empty() || i.trim().is_empty() {
-            return Ok(RouteMatcher::Any);
+            return Ok(RouteMatcher::Empty);
         }
 
         let (_i, matcher) = top_level(i).map_err(|e| MatcherParseError::new(e.to_string()))?;
@@ -94,29 +96,40 @@ impl RouteMatcher {
                 .unwrap_or(false),
             RouteMatcher::And(lhs, rhs) => lhs.matchs(req) && rhs.matchs(req),
             RouteMatcher::Or(lhs, rhs) => lhs.matchs(req) || rhs.matchs(req),
-            Any => true,
+            RouteMatcher::Empty => true,
         }
     }
 }
 
-fn in_quotes(buf: &str) -> IResult<&str, String> {
+fn in_quotes(input: &str) -> IResult<&str, String> {
     let mut ret = String::new();
-    let mut should_escape = false;
-    for (i, ch) in buf.chars().enumerate() {
-        if ch == '\'' && !should_escape {
-            return Ok((&buf[i..], ret));
+    let mut iter = input.chars().peekable();
+    let mut offset = 0;
+
+    loop {
+        match iter.next() {
+            Some('\'') => {
+                return Ok((&input[offset..], ret));
+            }
+            Some('\\') => {
+                let ch = iter
+                    .peek()
+                    .ok_or_else(|| nom::Err::Incomplete(nom::Needed::Unknown))?;
+
+                if ESCAPE_CHARS.contains(*ch) {
+                    ret.push(iter.next().unwrap());
+                    offset += 1;
+                }
+            }
+            Some(ch) => {
+                ret.push(ch);
+            }
+            None => {
+                return Err(nom::Err::Incomplete(nom::Needed::Unknown));
+            }
         }
-        if ch == '\\' && !should_escape {
-            should_escape = true;
-        } else if r#"\'""#.contains(ch) && should_escape {
-            ret.push(ch);
-            should_escape = false;
-        } else {
-            ret.push(ch);
-            should_escape = false;
-        }
+        offset += 1;
     }
-    Err(nom::Err::Incomplete(nom::Needed::Unknown))
 }
 
 fn key_value(i: &str) -> IResult<&str, (String, String)> {
@@ -140,7 +153,7 @@ fn parse_str(i: &str) -> IResult<&str, String> {
 fn host(i: &str) -> IResult<&str, RouteMatcher> {
     let (i, s) = delimited(tag("Host("), parse_str, tag(")"))(i)?;
 
-    Ok((i, RouteMatcher::Host(s.to_string())))
+    Ok((i, RouteMatcher::Host(s)))
 }
 
 fn host_regexp(i: &str) -> IResult<&str, RouteMatcher> {
@@ -164,7 +177,7 @@ fn method(i: &str) -> IResult<&str, RouteMatcher> {
 fn path(i: &str) -> IResult<&str, RouteMatcher> {
     let (i, s) = delimited(tag("Path("), parse_str, tag(")"))(i)?;
 
-    Ok((i, RouteMatcher::Path(s.to_string())))
+    Ok((i, RouteMatcher::Path(s)))
 }
 
 fn path_regexp(i: &str) -> IResult<&str, RouteMatcher> {
@@ -265,6 +278,13 @@ mod test {
             RouteMatcher::parse(input),
             Ok(RouteMatcher::Host("www.'google.com".to_string()))
         );
+
+        let input = r#"Host('www.\'go\"ogle.\\com')"#;
+
+        assert_eq!(
+            RouteMatcher::parse(input),
+            Ok(RouteMatcher::Host(r#"www.'go"ogle.\com"#.to_string()))
+        );
     }
 
     #[test]
@@ -348,6 +368,9 @@ mod test {
         let manage_path = Box::new(RouteMatcher::Path("/api/manage/".to_string()));
         let path = Box::new(RouteMatcher::Or(admin_path, manage_path));
 
-        assert_eq!(RouteMatcher::parse(input), Ok(RouteMatcher::And(host, path)));
+        assert_eq!(
+            RouteMatcher::parse(input),
+            Ok(RouteMatcher::And(host, path))
+        );
     }
 }

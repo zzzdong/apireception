@@ -1,25 +1,15 @@
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use arc_swap::ArcSwap;
 use drain::Watch;
-use futures::Future;
-use hyper::{server::conn::Http, service::service_fn};
-use hyper::{Body, Request, Response};
-use tokio::io;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::{
-    net::{TcpListener, TcpStream, ToSocketAddrs},
-    select,
-};
+use hyper::server::conn::Http;
+use tokio::net::TcpListener;
 use tower::Service;
 use tracing::Instrument;
-use tracing::{debug, warn};
 
 use crate::config::SharedData;
-use crate::services::{ConnService, HttpService};
+use crate::services::{ConnService, GatewayService};
 use crate::trace::TraceExecutor;
 
 pub struct Server {
@@ -28,15 +18,13 @@ pub struct Server {
 
 impl Server {
     pub fn new(shared_data: Arc<ArcSwap<SharedData>>) -> Self {
-        Server {
-            shared_data
-        }
+        Server { shared_data }
     }
 
     pub async fn run(self, addr: SocketAddr, watch: Watch) -> crate::Result<()> {
         let Server { shared_data } = self;
 
-        let http_svc = HttpService::new(shared_data);
+        let http_svc = GatewayService::new(shared_data);
 
         let http = Http::new().with_executor(TraceExecutor::new());
 

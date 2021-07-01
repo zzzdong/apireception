@@ -1,12 +1,13 @@
 use std::sync::{Arc, RwLock};
 
 use hyper::client::HttpConnector;
+use hyper::client::ResponseFuture;
 use hyper::Body;
 use hyper::Client;
 
-use crate::http::not_found;
-use crate::http::upstream_all_down;
+use crate::http::{bad_gateway, upstream_unavailable};
 use crate::matcher::RouteMatcher;
+use crate::services::RemoteInfo;
 use crate::upstream::Context;
 use crate::upstream::Upstream;
 
@@ -25,27 +26,33 @@ impl Route {
         &self,
         mut req: hyper::Request<hyper::Body>,
     ) -> hyper::Response<Body> {
-        let upstream = self.upstream.read().unwrap();
+        let remote_addr = req.extensions().get::<RemoteInfo>().unwrap().addr;
 
-        let working_upstream = upstream.heathy_endpoints();
+        let uri = {
+            let upstream = self.upstream.read().unwrap();
 
-        if working_upstream.is_empty() {
-            return upstream_all_down();
-        }
+            let working_upstream = upstream.heathy_endpoints();
 
-        let ctx = Context {
-            upstream_addrs: &working_upstream,
+            if working_upstream.is_empty() {
+                return upstream_unavailable();
+            }
+
+            let ctx = Context {
+                upstream_addrs: &working_upstream,
+                remote_addr: &remote_addr,
+            };
+
+            upstream.select_upstream(&ctx, &req)
         };
 
-        let uri = upstream.select_upstream(&ctx, &req);
-
-        *req.uri_mut() = uri;
+        let upstream = uri.authority().unwrap();
+        *req.uri_mut() = uri.clone();
 
         match self.client.request(req).await {
             Ok(resp) => resp,
             Err(err) => {
-                tracing::error!(?err, "forward request failed");
-                not_found()
+                tracing::error!(?err, ?upstream, "forward request failed");
+                bad_gateway()
             }
         }
     }

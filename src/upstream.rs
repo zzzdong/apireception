@@ -33,7 +33,7 @@ impl Upstream {
         }
     }
 
-    pub fn heathy_endpoints<'a>(&'a self) -> Vec<&'a str> {
+    pub fn heathy_endpoints(&self) -> Vec<&str> {
         self.endpoints
             .iter()
             .filter(|(_, healthiness)| healthiness.load().as_ref() == &Healthiness::Healthly)
@@ -55,7 +55,7 @@ impl Upstream {
 }
 
 pub struct Context<'a> {
-    // pub client_addr: &'a SocketAddr,
+    pub remote_addr: &'a SocketAddr,
     pub upstream_addrs: &'a [&'a str],
 }
 
