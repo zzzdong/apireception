@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, warn};
 
-use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse, ResponseFuture};
+use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse, RemoteInfo, ResponseFuture};
 use crate::{config::SharedData, peer_addr::PeerAddr, router::Route};
 
 #[derive(Clone)]
@@ -106,7 +106,7 @@ where
 
         let addr = io.peer_addr().expect("can not get peer addr");
         let info = RemoteInfo::new(addr);
-        let svc = RemoteInfoService::new(inner, info);
+        let svc = AppendInfoService::new(inner, info);
 
         Box::pin(async move {
             let mut conn = server.serve_connection(io, svc);
@@ -126,30 +126,19 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct RemoteInfo {
-    pub addr: SocketAddr,
-}
-
-impl RemoteInfo {
-    pub fn new(addr: SocketAddr) -> Self {
-        RemoteInfo { addr }
-    }
-}
-
 #[derive(Clone, Debug)]
-struct RemoteInfoService<S> {
+struct AppendInfoService<S, T> {
     inner: S,
-    info: RemoteInfo,
+    info: T,
 }
 
-impl<S> RemoteInfoService<S> {
-    pub fn new(inner: S, info: RemoteInfo) -> Self {
-        RemoteInfoService { inner, info }
+impl<S, T> AppendInfoService<S, T> {
+    pub fn new(inner: S, info: T) -> Self {
+        AppendInfoService { inner, info }
     }
 }
 
-impl<S> Service<HyperRequest> for RemoteInfoService<S>
+impl<S, T> Service<HyperRequest> for AppendInfoService<S, T>
 where
     S: Service<HyperRequest, Response = HyperResponse, Error = crate::Error>
         + Clone
@@ -157,6 +146,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
+    T: Clone + Send + Sync + 'static,
 {
     type Response = HyperResponse;
     type Error = crate::Error;
@@ -167,7 +157,7 @@ where
     }
 
     fn call(&mut self, mut req: HyperRequest) -> Self::Future {
-        let RemoteInfoService { mut inner, info } = self.clone();
+        let AppendInfoService { mut inner, info } = self.clone();
 
         req.extensions_mut().insert(info);
 

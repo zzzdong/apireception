@@ -1,5 +1,3 @@
-use std::net::SocketAddr;
-
 mod config;
 mod error;
 mod health;

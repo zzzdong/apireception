@@ -114,7 +114,7 @@ fn in_quotes(input: &str) -> IResult<&str, String> {
             Some('\\') => {
                 let ch = iter
                     .peek()
-                    .ok_or_else(|| nom::Err::Incomplete(nom::Needed::Unknown))?;
+                    .ok_or(nom::Err::Incomplete(nom::Needed::Unknown))?;
 
                 if ESCAPE_CHARS.contains(*ch) {
                     ret.push(iter.next().unwrap());

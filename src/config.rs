@@ -6,7 +6,6 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use hyper::Client;
 use serde::{Deserialize, Serialize};
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
@@ -47,6 +46,8 @@ pub struct RouteConfig {
     pub matcher: String,
     #[serde(default)]
     pub priority: u32,
+    #[serde(default)]
+    pub script: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -68,7 +69,7 @@ impl Config {
         let ext = path
             .extension()
             .and_then(|p| p.to_str())
-            .ok_or(unsupport_file())?;
+            .ok_or_else(unsupport_file)?;
 
         let content = std::fs::read_to_string(path)?;
 
@@ -91,7 +92,7 @@ impl Config {
         let ext = path
             .extension()
             .and_then(|p| p.to_str())
-            .ok_or_else(|| unsupport_file())?;
+            .ok_or_else(unsupport_file)?;
 
         let contents = match ext {
             "yaml" => serde_yaml::to_string(self)?,
@@ -158,9 +159,9 @@ impl SharedData {
 
             let route = Route {
                 matcher,
-                upstream: upstream,
-                priority: r.priority,
+                upstream,
                 client,
+                priority: r.priority,
             };
 
             for uri in &r.uris {
@@ -205,6 +206,7 @@ mod test {
                     upstream_name: "upstream-001".to_string(),
                     matcher: "".to_string(),
                     priority: 0,
+                    script: "".to_string(),
                 },
                 RouteConfig {
                     name: "hello-to-tom".to_string(),
@@ -212,6 +214,7 @@ mod test {
                     upstream_name: "upstream-002".to_string(),
                     matcher: "Query('name', 'tom')".to_string(),
                     priority: 100,
+                    script: "".to_string(),
                 },
             ],
             upstreams: vec![

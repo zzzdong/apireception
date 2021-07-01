@@ -1,13 +1,14 @@
 use std::sync::{Arc, RwLock};
 
 use hyper::client::HttpConnector;
-use hyper::client::ResponseFuture;
 use hyper::Body;
 use hyper::Client;
 
-use crate::http::{bad_gateway, upstream_unavailable};
+use crate::http::HyperRequest;
+use crate::http::HyperResponse;
+use crate::http::RemoteInfo;
+use crate::http::{set_proxy_headers, bad_gateway, upstream_unavailable};
 use crate::matcher::RouteMatcher;
-use crate::services::RemoteInfo;
 use crate::upstream::Context;
 use crate::upstream::Upstream;
 
@@ -22,11 +23,13 @@ pub struct Route {
 }
 
 impl Route {
-    pub async fn forward_request(
-        &self,
-        mut req: hyper::Request<hyper::Body>,
-    ) -> hyper::Response<Body> {
-        let remote_addr = req.extensions().get::<RemoteInfo>().unwrap().addr;
+    pub async fn forward_request(&self, mut req: HyperRequest) -> HyperResponse {
+        let info = req
+            .extensions_mut()
+            .remove::<RemoteInfo>()
+            .expect("RemoteInfo not found");
+
+        let remote_addr = info.addr;
 
         let uri = {
             let upstream = self.upstream.read().unwrap();
@@ -44,6 +47,8 @@ impl Route {
 
             upstream.select_upstream(&ctx, &req)
         };
+
+        set_proxy_headers(&mut req, &info);
 
         let upstream = uri.authority().unwrap();
         *req.uri_mut() = uri.clone();

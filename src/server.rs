@@ -30,6 +30,8 @@ impl Server {
 
         let listener = TcpListener::bind(addr).await?;
 
+        tracing::info!("server listen on {:?}", addr);
+
         let conn_svc = ConnService::new(http_svc, http, watch.clone());
 
         loop {
