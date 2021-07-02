@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -10,7 +9,7 @@ use futures::Future;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
-use tracing::{debug, warn};
+use tracing::{debug};
 
 use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse, RemoteInfo, ResponseFuture};
 use crate::{config::SharedData, peer_addr::PeerAddr, router::Route};
@@ -31,7 +30,7 @@ impl Service<HyperRequest> for GatewayService {
     type Error = crate::Error;
     type Future = ResponseFuture;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -152,7 +151,7 @@ where
     type Error = crate::Error;
     type Future = ResponseFuture;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 

@@ -3,7 +3,7 @@ use hyper::{header::HOST, Body, Method};
 use nom::{
     branch::alt,
     bytes::{complete::tag, complete::take_while},
-    combinator::{eof, map_res, peek},
+    combinator::{eof, map_res},
     sequence::{delimited, separated_pair},
     IResult,
 };

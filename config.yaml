@@ -1,8 +1,8 @@
 ---
 server:
   log_level: debug
-  http_addr: "0.0.0.0:5000"
-  https_addr: "0.0.0.0:443"
+  http_addr: "0.0.0.0:8080"
+  https_addr: "0.0.0.0:8443"
   tls_config:
     www.example.com:
       cert_path: example.cert
@@ -11,23 +11,32 @@ routes:
   - name: hello
     uris:
       - /hello
-    matcher: ""
     upstream_name: upstream-001
+    matcher: ""
     priority: 0
+    script: ""
+    path_rewrite: Keep
   - name: hello-to-tom
     uris:
-      - /hello
-    matcher: "Query('name', 'tom')"
+      - /hello/*
     upstream_name: upstream-002
+    matcher: "Query('name', 'tom')"
     priority: 100
+    script: ""
+    path_rewrite:
+      RegexReplace:
+        - /hello/(.*)
+        - /$1
 upstreams:
   - name: upstream-001
     endpoints:
       - addr: "127.0.0.1:8080"
         weight: 1
     strategy: random
+    is_https: false
   - name: upstream-002
     endpoints:
-      - addr: "127.0.0.1:8090"
+      - addr: "127.0.0.1:5000"
         weight: 1
     strategy: random
+    is_https: false

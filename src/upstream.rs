@@ -3,34 +3,45 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use arc_swap::ArcSwap;
-use hyper::{Body, Request, Uri};
+use hyper::http::uri::{Scheme, Uri};
 use rand::{thread_rng, Rng};
 
-use crate::config::{Config, Endpoint, UpstreamConfig};
+use crate::config::{Endpoint, UpstreamConfig};
+use crate::error::ConfigError;
 use crate::health::Healthiness;
-use crate::http::HyperRequest;
+use crate::http_client::GatewayClient;
 
 pub struct Upstream {
     pub name: String,
+    pub scheme: Scheme,
+    pub client: GatewayClient,
     endpoints: Vec<(Endpoint, ArcSwap<Healthiness>)>,
-    strategy: Box<dyn LoadBalanceStrategy + Send + Sync + 'static>,
 }
 
 impl Upstream {
-    pub fn new(config: &UpstreamConfig) -> Self {
+    pub fn new(config: &UpstreamConfig) -> Result<Self, ConfigError> {
         let endpoints = config
             .endpoints
             .iter()
             .map(|ep| (ep.clone(), ArcSwap::new(Arc::new(Healthiness::Healthly))))
             .collect();
 
-        let strategy = Box::new(Random::new());
+        let scheme = if config.is_https {
+            Scheme::HTTPS
+        } else {
+            Scheme::HTTP
+        };
 
-        Upstream {
+        let strategy: Arc<Box<dyn LoadBalanceStrategy>> = Arc::new(Box::new(Random::new()));
+
+        let client = GatewayClient::new(strategy);
+
+        Ok(Upstream {
             name: config.name.clone(),
             endpoints,
-            strategy,
-        }
+            scheme,
+            client,
+        })
     }
 
     pub fn heathy_endpoints(&self) -> Vec<&str> {
@@ -41,16 +52,8 @@ impl Upstream {
             .collect::<Vec<_>>()
     }
 
-    pub fn select_upstream<'a>(&'a self, ctx: &'a Context, req: &HyperRequest) -> Uri {
-        let endpoint = self.strategy.select_upstream(ctx);
-
-        let path = req.uri().path_and_query().unwrap().clone();
-        Uri::builder()
-            .scheme("http")
-            .authority(endpoint)
-            .path_and_query(path)
-            .build()
-            .unwrap()
+    pub fn select_upstream<'a>(&'a self, ctx: &'a Context) -> String {
+        self.client.strategy.select_upstream(ctx).to_string()
     }
 }
 
@@ -59,12 +62,13 @@ pub struct Context<'a> {
     pub upstream_addrs: &'a [&'a str],
 }
 
-trait LoadBalanceStrategy {
+pub trait LoadBalanceStrategy: Send + Sync + std::fmt::Debug {
     fn select_upstream<'a>(&self, context: &'a Context) -> &'a str;
-    fn on_tcp_open(&mut self, endpoint: &str) {}
-    fn on_tcp_close(&mut self, endpoint: &str) {}
+    fn on_send_request(&self, uri: &Uri) {}
+    fn on_request_done(&self, uri: &Uri) {}
 }
 
+#[derive(Debug)]
 struct Random {}
 
 impl Random {
@@ -81,6 +85,7 @@ impl LoadBalanceStrategy for Random {
     }
 }
 
+#[derive(Debug)]
 struct LeastConnection {
     connections: RwLock<HashMap<String, usize>>,
 }
@@ -136,13 +141,17 @@ impl LoadBalanceStrategy for LeastConnection {
         }
     }
 
-    fn on_tcp_open(&mut self, endpoint: &str) {
+    fn on_send_request(&self, endpoint: &Uri) {
         let mut connections = self.connections.write().unwrap();
-        *connections.entry(endpoint.to_string()).or_insert(0) += 1;
+        *connections
+            .entry(endpoint.authority().unwrap().to_string())
+            .or_insert(0) += 1;
     }
 
-    fn on_tcp_close(&mut self, endpoint: &str) {
+    fn on_request_done(&self, endpoint: &Uri) {
         let mut connections = self.connections.write().unwrap();
-        *connections.entry(endpoint.to_string()).or_insert(0) -= 1;
+        *connections
+            .entry(endpoint.authority().unwrap().to_string())
+            .or_insert(0) -= 1;
     }
 }

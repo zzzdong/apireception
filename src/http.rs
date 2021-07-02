@@ -1,8 +1,8 @@
 use std::{net::SocketAddr, pin::Pin};
 
 use futures::Future;
-use headers::{HeaderName, HeaderValue};
-use hyper::{Body, StatusCode, client::HttpConnector};
+use headers::HeaderValue;
+use hyper::StatusCode;
 
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
 const X_REAL_IP: &str = "x-real-ip";
@@ -12,8 +12,6 @@ pub type HyperResponse = hyper::Response<hyper::Body>;
 pub type HttpServer = hyper::server::conn::Http<crate::trace::TraceExecutor>;
 pub type ResponseFuture =
     Pin<Box<dyn Future<Output = Result<HyperResponse, crate::Error>> + Send + 'static>>;
-
-pub type HttpClient = hyper::Client<HttpConnector, Body>;
 
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
@@ -25,12 +23,6 @@ impl RemoteInfo {
         RemoteInfo { addr }
     }
 }
-
-
-
-
-
-
 
 pub fn set_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
     let x_forwarded_for = req.headers().get(X_FORWARDED_FOR);
