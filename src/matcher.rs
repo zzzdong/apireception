@@ -12,7 +12,7 @@ use std::{collections::HashMap, convert::TryFrom, ops::Deref};
 
 use crate::error::MatcherParseError;
 
-const ESCAPE_CHARS: &str = r#"\'""#;
+const ESCAPE_CHARS: &str = r#"\'"()"#;
 
 #[derive(Debug, Clone)]
 pub struct ComparableRegex(Regex);
@@ -305,6 +305,18 @@ mod test {
             RouteMatcher::parse(input),
             Ok(RouteMatcher::HostRegexp(
                 ComparableRegex::new("[0-9]+").unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_path_regexp() {
+        let input = r#"PathRegexp('/hello/\(.*\)')"#;
+
+        assert_eq!(
+            RouteMatcher::parse(input),
+            Ok(RouteMatcher::PathRegexp(
+                ComparableRegex::new("/hello/(.*)").unwrap()
             ))
         );
     }

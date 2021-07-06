@@ -8,33 +8,45 @@ server:
       cert_path: example.cert
       key_path: example.key
 routes:
-  - name: hello
+  - id: hello
+    name: hello
+    desc: ""
     uris:
       - /hello
-    upstream_name: upstream-001
+    upstream_id: upstream-001
     matcher: ""
     priority: 0
-    script: ""
-    path_rewrite: Keep
-  - name: hello-to-tom
+    plugins: []
+  - id: hello-to-tom
+    name: hello-to-tom
+    desc: ""
     uris:
       - /hello/*
-    upstream_name: upstream-002
+    upstream_id: upstream-002
     matcher: "Query('name', 'tom')"
     priority: 100
-    script: ""
-    path_rewrite:
-      RegexReplace:
-        - /hello/(.*)
-        - /$1
+    plugins:
+      - PathRewrite:
+          RegexReplace:
+            - /hello/(.*)
+            - /$1
+      - TrafficSplit:
+          enable: true
+          rules:
+            - matcher: "PathRegexp('/hello/world/\\(.*\\)')"
+              upstream_id: hello-to-tom
 upstreams:
-  - name: upstream-001
+  - id: upstream-001
+    name: upstream-001
+    desc: ""
     endpoints:
-      - addr: "127.0.0.1:8080"
+      - addr: "127.0.0.1:5000"
         weight: 1
     strategy: random
     is_https: false
-  - name: upstream-002
+  - id: upstream-002
+    name: upstream-002
+    desc: ""
     endpoints:
       - addr: "127.0.0.1:5000"
         weight: 1

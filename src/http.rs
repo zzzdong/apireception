@@ -24,7 +24,7 @@ impl RemoteInfo {
     }
 }
 
-pub fn set_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
+pub fn append_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
     let x_forwarded_for = req.headers().get(X_FORWARDED_FOR);
 
     let x_forwarded_for = match x_forwarded_for {

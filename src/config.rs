@@ -1,17 +1,15 @@
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::{Arc, RwLock},
-};
+use std::{cmp::Reverse, collections::HashMap, net::SocketAddr, path::{Path, PathBuf}, sync::{Arc, RwLock}};
 
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
-use crate::error::{unsupport_file, ConfigError};
 use crate::router::{PathRouter, Route};
 use crate::upstream::Upstream;
+use crate::{
+    error::{unsupport_file, ConfigError},
+    plugins::PluginItem,
+};
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
@@ -36,22 +34,24 @@ pub struct TlsConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RouteConfig {
+    pub id: String,
     pub name: String,
+    pub desc: String,
     pub uris: Vec<String>,
-    pub upstream_name: String,
+    pub upstream_id: String,
     #[serde(default)]
     pub matcher: String,
     #[serde(default)]
     pub priority: u32,
     #[serde(default)]
-    pub script: String,
-    #[serde(default)]
-    pub path_rewrite: PathRewriteConfig,
+    pub plugins: Vec<PluginItem>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UpstreamConfig {
+    pub id: String,
     pub name: String,
+    pub desc: String,
     pub endpoints: Vec<Endpoint>,
     pub strategy: String,
     #[serde(default)]
@@ -62,19 +62,6 @@ pub struct UpstreamConfig {
 pub struct Endpoint {
     pub addr: String,
     pub weight: u32,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub enum PathRewriteConfig {
-    Keep,
-    Static(String),
-    RegexReplace(String, String),
-}
-
-impl Default for PathRewriteConfig {
-    fn default() -> Self {
-        PathRewriteConfig::Keep
-    }
 }
 
 impl Config {
@@ -167,7 +154,7 @@ impl SharedData {
             for uri in &r.uris {
                 router.add_or_update_with(uri, vec![route.clone()], |routes| {
                     routes.push(route.clone());
-                    routes.sort_unstable_by(|a, b| b.priority.cmp(&a.priority))
+                    routes.sort_unstable_by_key(|r| Reverse(r.priority))
                 });
             }
         }
@@ -178,6 +165,8 @@ impl SharedData {
 
 #[cfg(test)]
 mod test {
+    use crate::plugins::{PathRewriteConfig, TrafficSplitConfig, TrafficSplitRule};
+
     use super::*;
 
     #[test]
@@ -201,39 +190,54 @@ mod test {
 
             routes: vec![
                 RouteConfig {
+                    id: "hello".to_string(),
                     name: "hello".to_string(),
+                    desc: String::new(),
                     uris: vec!["/hello".to_string()],
-                    upstream_name: "upstream-001".to_string(),
+                    upstream_id: "upstream-001".to_string(),
                     matcher: "".to_string(),
                     priority: 0,
-                    script: "".to_string(),
-                    path_rewrite: PathRewriteConfig::Keep,
+                    plugins: vec![],
                 },
                 RouteConfig {
+                    id: "hello-to-tom".to_string(),
                     name: "hello-to-tom".to_string(),
+                    desc: String::new(),
                     uris: vec!["/hello/*".to_string()],
-                    upstream_name: "upstream-002".to_string(),
+                    upstream_id: "upstream-002".to_string(),
                     matcher: "Query('name', 'tom')".to_string(),
                     priority: 100,
-                    script: "".to_string(),
-                    path_rewrite: PathRewriteConfig::RegexReplace(
-                        String::from("/hello/(.*)"),
-                        String::from("/$1"),
-                    ),
+                    plugins: vec![
+                        PluginItem::PathRewrite(PathRewriteConfig::RegexReplace(
+                            String::from("/hello/(.*)"),
+                            String::from("/$1"),
+                        )),
+                        PluginItem::TrafficSplit(TrafficSplitConfig {
+                            enable: true,
+                            rules: vec![TrafficSplitRule {
+                                matcher: r#"PathRegexp('/hello/world/\(.*\)')"#.to_string(),
+                                upstream_id: "hello-to-tom".to_string(),
+                            }],
+                        }),
+                    ],
                 },
             ],
             upstreams: vec![
                 UpstreamConfig {
+                    id: "upstream-001".to_string(),
                     name: "upstream-001".to_string(),
+                    desc: String::new(),
                     endpoints: vec![Endpoint {
-                        addr: "127.0.0.1:8080".to_string(),
+                        addr: "127.0.0.1:5000".to_string(),
                         weight: 1,
                     }],
                     strategy: "random".to_string(),
                     is_https: false,
                 },
                 UpstreamConfig {
+                    id: "upstream-002".to_string(),
                     name: "upstream-002".to_string(),
+                    desc: String::new(),
                     endpoints: vec![Endpoint {
                         addr: "127.0.0.1:5000".to_string(),
                         weight: 1,

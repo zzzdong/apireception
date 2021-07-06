@@ -7,6 +7,7 @@ use hyper::http::uri::{Scheme, Uri};
 use rand::{thread_rng, Rng};
 
 use crate::config::{Endpoint, UpstreamConfig};
+use crate::context::GatewayContext;
 use crate::error::ConfigError;
 use crate::health::Healthiness;
 use crate::http_client::GatewayClient;
@@ -52,8 +53,13 @@ impl Upstream {
             .collect::<Vec<_>>()
     }
 
-    pub fn select_upstream<'a>(&'a self, ctx: &'a Context) -> String {
-        self.client.strategy.select_upstream(ctx).to_string()
+    pub fn select_upstream<'a>(&'a self, ctx: &GatewayContext) -> String {
+        let context = Context {
+            remote_addr: &ctx.remote_addr,
+            upstream_addrs: &self.heathy_endpoints(),
+        };
+
+        self.client.strategy.select_upstream(&context).to_string()
     }
 }
 

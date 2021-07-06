@@ -1,10 +1,12 @@
 mod config;
+mod context;
 mod error;
 mod health;
 mod http;
 mod http_client;
 mod matcher;
 mod peer_addr;
+mod plugins;
 mod router;
 mod server;
 mod services;

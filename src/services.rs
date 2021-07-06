@@ -1,18 +1,32 @@
 use std::{
+    collections::HashMap,
+    convert::TryFrom,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
 };
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, Cache};
 use futures::Future;
-
+use hyper::{http::uri::Authority, Uri};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
-use tracing::{debug};
+use tracing::{debug, error};
 
-use crate::http::{not_found, HttpServer, HyperRequest, HyperResponse, RemoteInfo, ResponseFuture};
-use crate::{config::SharedData, peer_addr::PeerAddr, router::Route};
+use crate::{
+    config::SharedData,
+    http::{append_proxy_headers, bad_gateway},
+    peer_addr::PeerAddr,
+    router::{PathRouter, Route},
+    upstream::Upstream,
+};
+use crate::{
+    context::GatewayContext,
+    http::{
+        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, RemoteInfo,
+        ResponseFuture,
+    },
+};
 
 #[derive(Clone)]
 pub struct GatewayService {
@@ -22,6 +36,88 @@ pub struct GatewayService {
 impl GatewayService {
     pub fn new(shared_data: Arc<ArcSwap<SharedData>>) -> Self {
         GatewayService { shared_data }
+    }
+
+    pub fn find_route<'a>(router: &'a PathRouter, req: &HyperRequest) -> Option<&'a Route> {
+        match router.recognize(req.uri().path()) {
+            Ok(m) => {
+                let routes = *m.handler();
+
+                let routes: Vec<&Route> =
+                    routes.iter().filter(|r| r.matcher.matchs(&req)).collect();
+
+                routes.first().cloned()
+            }
+            Err(err) => {
+                error!(%err, "find route failed");
+                None
+            }
+        }
+    }
+
+    pub async fn dispatch(
+        route: &Route,
+        upstreams: &HashMap<String, Arc<RwLock<Upstream>>>,
+        mut req: HyperRequest,
+    ) -> HyperResponse {
+        let info = req
+            .extensions_mut()
+            .remove::<RemoteInfo>()
+            .expect("RemoteInfo must exist");
+
+        let remote_addr = info.addr;
+
+        let mut ctx = GatewayContext {
+            remote_addr,
+            upstream_id: route.upstream_id.clone(),
+        };
+
+        for plugin in &route.plugins {
+            match plugin.on_access(&mut ctx, req) {
+                Ok(r) => {
+                    req = r;
+                }
+                Err(resp) => {
+                    return resp;
+                }
+            }
+        }
+
+        let mut client = match upstreams.get(&ctx.upstream_id) {
+            Some(upstream) => {
+                let mut parts = req.uri().clone().into_parts();
+
+                let upstream = upstream.read().unwrap();
+                parts.scheme = Some(upstream.scheme.clone());
+
+                let authority = upstream.select_upstream(&ctx);
+                let authority = Authority::try_from(authority.as_str()).ok();
+                parts.authority = authority;
+
+                *req.uri_mut() = Uri::from_parts(parts).expect("build uri failed");
+
+                upstream.client.clone()
+            }
+            None => {
+                return upstream_unavailable();
+            }
+        };
+
+        append_proxy_headers(&mut req, &info);
+
+        let mut resp = match Service::call(&mut client, req).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                error!(?err, "forward request failed");
+                bad_gateway()
+            }
+        };
+
+        for plugin in &route.plugins {
+            resp = plugin.after_forward(&mut ctx, resp);
+        }
+
+        resp
     }
 }
 
@@ -35,25 +131,18 @@ impl Service<HyperRequest> for GatewayService {
     }
 
     fn call(&mut self, req: HyperRequest) -> Self::Future {
-        let shared = self.shared_data.load();
+        let mut shared = Cache::new(self.shared_data.clone());
 
         Box::pin(async move {
-            let resp = match shared.router.recognize(req.uri().path()) {
-                Ok(m) => {
-                    let routes = *m.handler();
-
-                    let routes: Vec<&Route> =
-                        routes.iter().filter(|r| r.matcher.matchs(&req)).collect();
-
-                    match routes.first() {
-                        Some(route) => {
-                            let resp = route.forward_request(req).await;
-                            resp
-                        }
-                        None => not_found(),
-                    }
+            let shared = shared.load();
+            let found = Self::find_route(&shared.router, &req);
+            let resp = match found {
+                Some(route) => {
+                    let upstreams = &shared.upstreams;
+                    let resp = Self::dispatch(route, upstreams, req).await;
+                    resp
                 }
-                Err(_e) => not_found(),
+                None => not_found(),
             };
 
             Ok(resp)
