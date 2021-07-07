@@ -91,7 +91,8 @@ impl GatewayService {
                 parts.scheme = Some(upstream.scheme.clone());
 
                 let authority = upstream.select_upstream(&ctx);
-                let authority = Authority::try_from(authority.as_str()).ok();
+                let authority =
+                    authority.and_then(|authority| Authority::try_from(authority.as_str()).ok());
                 parts.authority = authority;
 
                 *req.uri_mut() = Uri::from_parts(parts).expect("build uri failed");
@@ -102,6 +103,11 @@ impl GatewayService {
                 return upstream_unavailable();
             }
         };
+
+        // check request
+        if req.uri().authority().is_none() {
+            return upstream_unavailable();
+        }
 
         append_proxy_headers(&mut req, &info);
 

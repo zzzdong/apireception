@@ -4,10 +4,6 @@ use std::sync::{Arc, RwLock};
 
 use crate::config::RouteConfig;
 use crate::error::{upstream_not_found, ConfigError};
-use crate::http::upstream_unavailable;
-use crate::http::HyperRequest;
-use crate::http::HyperResponse;
-use crate::http::RemoteInfo;
 use crate::matcher::RouteMatcher;
 use crate::plugins::{init_plugin, Plugin};
 use crate::upstream::Upstream;

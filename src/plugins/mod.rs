@@ -29,11 +29,13 @@ pub trait Plugin {
         ctx: &mut GatewayContext,
         req: HyperRequest,
     ) -> Result<HyperRequest, HyperResponse> {
+        let _ = ctx;
         Ok(req)
     }
 
     /// after forward request, check or rewrite response.
     fn after_forward(&self, ctx: &mut GatewayContext, resp: HyperResponse) -> HyperResponse {
+        let _ = ctx;
         resp
     }
 }

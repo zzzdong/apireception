@@ -32,6 +32,8 @@ pub enum ConfigError {
     Message(String),
     #[error("upstream<{0}> not found")]
     UpstreamNotFound(String),
+    #[error("unkonwn strategy<{0}>")]
+    UnknownLBStrategy(String),
 }
 
 #[derive(Debug, PartialEq)]

@@ -1,4 +1,10 @@
-use std::{cmp::Reverse, collections::HashMap, net::SocketAddr, path::{Path, PathBuf}, sync::{Arc, RwLock}};
+use std::{
+    cmp::Reverse,
+    collections::HashMap,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::{Arc, RwLock},
+};
 
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
@@ -242,7 +248,7 @@ mod test {
                         addr: "127.0.0.1:5000".to_string(),
                         weight: 1,
                     }],
-                    strategy: "random".to_string(),
+                    strategy: "weighted".to_string(),
                     is_https: false,
                 },
             ],

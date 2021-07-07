@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use hyper::{http::uri::PathAndQuery, Uri};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 use crate::error::ConfigError;
 
@@ -66,6 +65,7 @@ impl Plugin for PathRewritePlugin {
         ctx: &mut crate::context::GatewayContext,
         mut req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
+        let _ = ctx;
         let orig_uri = req.uri().clone();
 
         let path = self.path_rewrite(orig_uri.path());
