@@ -30,11 +30,13 @@ use crate::{
 
 #[derive(Clone)]
 pub struct GatewayService {
-    shared_data: Arc<ArcSwap<SharedData>>,
+    shared_data: Cache<Arc<ArcSwap<SharedData>>, Arc<SharedData>>,
 }
 
 impl GatewayService {
     pub fn new(shared_data: Arc<ArcSwap<SharedData>>) -> Self {
+        let shared_data = Cache::new(shared_data);
+
         GatewayService { shared_data }
     }
 
@@ -137,10 +139,9 @@ impl Service<HyperRequest> for GatewayService {
     }
 
     fn call(&mut self, req: HyperRequest) -> Self::Future {
-        let mut shared = Cache::new(self.shared_data.clone());
+        let shared = self.shared_data.load().clone();
 
         Box::pin(async move {
-            let shared = shared.load();
             let found = Self::find_route(&shared.router, &req);
             let resp = match found {
                 Some(route) => {
