@@ -10,7 +10,7 @@ use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
-use crate::router::{PathRouter, Route};
+use crate::{health::HealthConfig, router::{PathRouter, Route}};
 use crate::upstream::Upstream;
 use crate::{
     error::{unsupport_file, ConfigError},
@@ -62,6 +62,7 @@ pub struct UpstreamConfig {
     pub strategy: String,
     #[serde(default)]
     pub is_https: bool,
+    pub health_check: HealthConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -239,6 +240,7 @@ mod test {
                     }],
                     strategy: "random".to_string(),
                     is_https: false,
+                    health_check: HealthConfig::default(),
                 },
                 UpstreamConfig {
                     id: "upstream-002".to_string(),
@@ -250,6 +252,7 @@ mod test {
                     }],
                     strategy: "weighted".to_string(),
                     is_https: false,
+                    health_check: HealthConfig::default(),
                 },
             ],
         };

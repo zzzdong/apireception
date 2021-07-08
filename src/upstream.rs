@@ -9,31 +9,32 @@ use rand::{thread_rng, Rng};
 use crate::config::{Endpoint, UpstreamConfig};
 use crate::context::GatewayContext;
 use crate::error::ConfigError;
-use crate::health::Healthiness;
+use crate::health::{HealthConfig, Healthiness};
 use crate::http_client::GatewayClient;
 
 pub struct Upstream {
     pub name: String,
     pub scheme: Scheme,
     pub client: GatewayClient,
-    endpoints: Vec<(Endpoint, ArcSwap<Healthiness>)>,
+    pub endpoints: Vec<(Endpoint, ArcSwap<Healthiness>)>,
+    pub health_config: HealthConfig,
 }
 
 impl Upstream {
-    pub fn new(config: &UpstreamConfig) -> Result<Self, ConfigError> {
-        let endpoints = config
+    pub fn new(cfg: &UpstreamConfig) -> Result<Self, ConfigError> {
+        let endpoints = cfg
             .endpoints
             .iter()
             .map(|ep| (ep.clone(), ArcSwap::new(Arc::new(Healthiness::Healthly))))
             .collect();
 
-        let scheme = if config.is_https {
+        let scheme = if cfg.is_https {
             Scheme::HTTPS
         } else {
             Scheme::HTTP
         };
 
-        let strategy: Arc<Box<dyn LoadBalanceStrategy>> = match config.strategy.as_str() {
+        let strategy: Arc<Box<dyn LoadBalanceStrategy>> = match cfg.strategy.as_str() {
             "random" => Arc::new(Box::new(Random::new())),
             "weighted" => Arc::new(Box::new(WeightedRandom::new())),
             "least_request" => Arc::new(Box::new(LeastRequest::new())),
@@ -45,10 +46,11 @@ impl Upstream {
         let client = GatewayClient::new(strategy);
 
         Ok(Upstream {
-            name: config.name.clone(),
+            name: cfg.name.clone(),
             endpoints,
             scheme,
             client,
+            health_config: cfg.health_check.clone(),
         })
     }
 

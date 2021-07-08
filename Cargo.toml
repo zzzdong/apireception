@@ -28,6 +28,7 @@ route-recognizer = "0.3"
 rand = "0.8"
 thiserror = "1"
 hyper-rustls ="0.22"
+hyper-timeout = "0.4"
 
 [patch.crates-io]
 route-recognizer = {git="https://github.com/zzzdong/route-recognizer", branch="add-add_or_update_with"}
