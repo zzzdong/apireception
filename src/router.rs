@@ -31,13 +31,13 @@ impl Route {
 
         let mut plugins = Vec::new();
 
-        for plugin in &cfg.plugins {
-            let p = init_plugin(plugin)?;
-            plugins.push(p);
-        }
+        // for plugin in &cfg.plugins {
+        //     let p = init_plugin(plugin)?;
+        //     plugins.push(p);
+        // }
 
         // sort plugin by priority
-        plugins.sort_unstable_by_key(|p| Reverse(p.priority()));
+        // plugins.sort_unstable_by_key(|p| Reverse(p.priority()));
 
         Ok(Route {
             matcher,

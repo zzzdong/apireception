@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{error::ConfigError, http::HyperRequest, matcher::RouteMatcher};
 
@@ -6,7 +7,6 @@ use super::Plugin;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct TrafficSplitConfig {
-    pub enable: bool,
     pub rules: Vec<TrafficSplitRule>,
 }
 
@@ -37,7 +37,8 @@ impl TrafficSplitItem {
 }
 
 impl TrafficSplitPlugin {
-    pub fn new(cfg: &TrafficSplitConfig) -> Result<Self, ConfigError> {
+    pub fn new(value: Value) -> Result<Self, ConfigError> {
+        let cfg: TrafficSplitConfig = serde_json::from_value(value)?;
         let mut rules = Vec::new();
 
         for rule in &cfg.rules {

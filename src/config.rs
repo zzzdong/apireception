@@ -8,13 +8,14 @@ use std::{
 
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
-use crate::{health::HealthConfig, router::{PathRouter, Route}};
+use crate::error::{unsupport_file, ConfigError};
 use crate::upstream::Upstream;
 use crate::{
-    error::{unsupport_file, ConfigError},
-    plugins::PluginItem,
+    health::HealthConfig,
+    router::{PathRouter, Route},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -50,7 +51,14 @@ pub struct RouteConfig {
     #[serde(default)]
     pub priority: u32,
     #[serde(default)]
-    pub plugins: Vec<PluginItem>,
+    pub plugins: HashMap<String, PluginConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct PluginConfig {
+    pub enable: bool,
+    #[serde(flatten)]
+    pub config: Value,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -177,6 +185,59 @@ mod test {
     use super::*;
 
     #[test]
+    fn plugin_config() {
+        #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+        pub struct PluginConfig {
+            pub enable: bool,
+            #[serde(flatten)]
+            pub config: Value,
+        }
+
+        #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+        pub struct Plugins {
+            pub plugins: HashMap<String, PluginConfig>,
+        }
+
+        let s = r#"{
+                "plugins": {
+                    "path_rewrite": {
+                        "enable": true,
+                        "Static": "/hello"
+                    },
+                    "traffic_split": {
+                        "enable": true,
+                        "rules": [
+                            {
+                                "matcher": "",
+                                "upstream_id": "upstream_id-001"
+                            }
+                        ]
+                    }
+                }
+            }"#;
+
+        let value: Plugins = serde_json::from_str(s).unwrap();
+
+        println!("ret={:?}", value);
+
+        for (k, v) in value.plugins {
+            match k.as_str() {
+                "path_rewrite" => {
+                    let cfg: PathRewriteConfig = serde_json::from_value(v.config).unwrap();
+
+                    println!("path_rewrite cfg={:?}", cfg);
+                }
+                "traffic_split" => {
+                    let cfg: TrafficSplitConfig = serde_json::from_value(v.config).unwrap();
+
+                    println!("traffic_split cfg={:?}", cfg);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
     fn example_config() {
         let cfg = Config {
             server: ServerConfig {
@@ -199,34 +260,34 @@ mod test {
                 RouteConfig {
                     id: "hello".to_string(),
                     name: "hello".to_string(),
-                    desc: String::new(),
                     uris: vec!["/hello".to_string()],
                     upstream_id: "upstream-001".to_string(),
                     matcher: "".to_string(),
                     priority: 0,
-                    plugins: vec![],
+                    plugins: HashMap::new(),
+                    ..Default::default()
                 },
                 RouteConfig {
                     id: "hello-to-tom".to_string(),
                     name: "hello-to-tom".to_string(),
-                    desc: String::new(),
                     uris: vec!["/hello/*".to_string()],
                     upstream_id: "upstream-002".to_string(),
                     matcher: "Query('name', 'tom')".to_string(),
                     priority: 100,
-                    plugins: vec![
-                        PluginItem::PathRewrite(PathRewriteConfig::RegexReplace(
-                            String::from("/hello/(.*)"),
-                            String::from("/$1"),
-                        )),
-                        PluginItem::TrafficSplit(TrafficSplitConfig {
-                            enable: true,
-                            rules: vec![TrafficSplitRule {
-                                matcher: r#"PathRegexp('/hello/world/\(.*\)')"#.to_string(),
-                                upstream_id: "hello-to-tom".to_string(),
-                            }],
-                        }),
-                    ],
+                    ..Default::default()
+                    // plugins: vec![
+                    //     PluginItem::PathRewrite(PathRewriteConfig::RegexReplace(
+                    //         String::from("/hello/(.*)"),
+                    //         String::from("/$1"),
+                    //     )),
+                    //     PluginItem::TrafficSplit(TrafficSplitConfig {
+                    //         // enable: true,
+                    //         rules: vec![TrafficSplitRule {
+                    //             matcher: r#"PathRegexp('/hello/world/\(.*\)')"#.to_string(),
+                    //             upstream_id: "hello-to-tom".to_string(),
+                    //         }],
+                    //     }),
+                    // ],
                 },
             ],
             upstreams: vec![

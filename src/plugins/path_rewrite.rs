@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use hyper::{http::uri::PathAndQuery, Uri};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::ConfigError;
 
@@ -29,7 +30,9 @@ pub(crate) enum PathRewritePlugin {
 }
 
 impl PathRewritePlugin {
-    pub fn new(cfg: &PathRewriteConfig) -> Result<Self, ConfigError> {
+    pub fn new(value: Value) -> Result<Self, ConfigError> {
+        let cfg: PathRewriteConfig = serde_json::from_value(value)?;
+
         let path_rewrite = match cfg {
             PathRewriteConfig::Keep => PathRewritePlugin::Keep,
             PathRewriteConfig::Static(ref s) => PathRewritePlugin::Static(s.to_string()),
