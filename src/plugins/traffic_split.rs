@@ -37,8 +37,7 @@ impl TrafficSplitItem {
 }
 
 impl TrafficSplitPlugin {
-    pub fn new(value: Value) -> Result<Self, ConfigError> {
-        let cfg: TrafficSplitConfig = serde_json::from_value(value)?;
+    pub fn new(cfg: TrafficSplitConfig) -> Result<Self, ConfigError> {
         let mut rules = Vec::new();
 
         for rule in &cfg.rules {

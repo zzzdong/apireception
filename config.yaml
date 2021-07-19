@@ -16,7 +16,7 @@ routes:
     upstream_id: upstream-001
     matcher: ""
     priority: 0
-    plugins: []
+    plugins: {}
   - id: hello-to-tom
     name: hello-to-tom
     desc: ""
@@ -26,15 +26,16 @@ routes:
     matcher: "Query('name', 'tom')"
     priority: 100
     plugins:
-      - PathRewrite:
-          RegexReplace:
-            - /hello/(.*)
-            - /$1
-      - TrafficSplit:
-          enable: true
-          rules:
-            - matcher: "PathRegexp('/hello/world/\\(.*\\)')"
-              upstream_id: hello-to-tom
+      path_rewrite:
+        enable: true
+        regex_replace:
+          - /hello/(.*)
+          - /$1
+      traffic_split:
+        enable: true
+        rules:
+          - matcher: "PathRegexp('/hello/world/\\(.*\\)')"
+            upstream_id: hello-to-tom
 upstreams:
   - id: upstream-001
     name: upstream-001
@@ -44,6 +45,10 @@ upstreams:
         weight: 1
     strategy: random
     is_https: false
+    health_check:
+      slow_threshold: 0
+      timeout: 0
+      path: ""
   - id: upstream-002
     name: upstream-002
     desc: ""
@@ -52,3 +57,7 @@ upstreams:
         weight: 1
     strategy: weighted
     is_https: false
+    health_check:
+      slow_threshold: 0
+      timeout: 0
+      path: ""

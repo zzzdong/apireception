@@ -53,7 +53,6 @@ pub async fn health_check_one_upstream(upstream: &Upstream) {
             .expect("build upstream uri failed");
 
         let cfg = upstream.health_config.clone();
-        let healthiness = healthiness.clone();
         // tokio::spawn(async move {
         //     detect_endpoint_health(client.clone(), uri, cfg, healthiness).await;
         // });

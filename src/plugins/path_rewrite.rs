@@ -30,9 +30,7 @@ pub(crate) enum PathRewritePlugin {
 }
 
 impl PathRewritePlugin {
-    pub fn new(value: Value) -> Result<Self, ConfigError> {
-        let cfg: PathRewriteConfig = serde_json::from_value(value)?;
-
+    pub fn new(cfg: PathRewriteConfig) -> Result<Self, ConfigError> {
         let path_rewrite = match cfg {
             PathRewriteConfig::Keep => PathRewritePlugin::Keep,
             PathRewriteConfig::Static(ref s) => PathRewritePlugin::Static(s.to_string()),

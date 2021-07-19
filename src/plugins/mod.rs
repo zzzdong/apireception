@@ -2,14 +2,12 @@ pub mod path_rewrite;
 pub mod traffic_split;
 
 use std::sync::Arc;
-use std::collections::HashMap;
+
+use serde::de::DeserializeOwned;
 
 use crate::context::GatewayContext;
 use crate::error::ConfigError;
 use crate::http::{HyperRequest, HyperResponse};
-
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 pub use self::path_rewrite::PathRewriteConfig;
 use self::path_rewrite::PathRewritePlugin;
@@ -42,23 +40,17 @@ pub trait Plugin {
     }
 }
 
-// pub fn init_plugin(plugin: &PluginItem) -> Result<Arc<Box<dyn Plugin + Send + Sync>>, ConfigError> {
-//     let plugin: Box<dyn Plugin + Send + Sync> = match plugin {
-//         PluginItem::PathRewrite(cfg) => Box::new(PathRewritePlugin::new(cfg)?),
-//         PluginItem::TrafficSplit(cfg) => Box::new(TrafficSplitPlugin::new(cfg)?),
-//     };
+fn parse_config<T: DeserializeOwned>(cfg: serde_json::Value) -> Result<T, ConfigError> {
+    serde_json::from_value(cfg).map_err(Into::into)
+}
 
-//     Ok(Arc::new(plugin))
-// }
-
-pub fn init_plugin(name: &str, cfg: Value) -> Result<Arc<Box<dyn Plugin + Send + Sync>>, ConfigError> {
+pub fn init_plugin(
+    name: &str,
+    cfg: serde_json::Value,
+) -> Result<Arc<Box<dyn Plugin + Send + Sync>>, ConfigError> {
     let plugin: Box<dyn Plugin + Send + Sync> = match name {
-        "path_rewrite" => {
-            Box::new(PathRewritePlugin::new(cfg)?)
-        }
-        "traffic_split" => {
-            Box::new(TrafficSplitPlugin::new(cfg)?)
-        }
+        "path_rewrite" => Box::new(PathRewritePlugin::new(parse_config(cfg)?)?),
+        "traffic_split" => Box::new(TrafficSplitPlugin::new(parse_config(cfg)?)?),
         _ => {
             return Err(ConfigError::Message("Unkown plugin".to_string()));
         }
