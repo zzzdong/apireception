@@ -2,9 +2,11 @@ use std::{net::SocketAddr, pin::Pin};
 
 use futures::Future;
 use headers::HeaderValue;
-use hyper::StatusCode;
+use hyper::{http::uri::Scheme, StatusCode};
 
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
+const X_FORWARDED_HOST: &str = "x-forwarded-host";
+const X_FORWARDED_PROTO: &str = "x-forwarded-proto";
 const X_REAL_IP: &str = "x-real-ip";
 
 pub type HyperRequest = hyper::Request<hyper::Body>;
@@ -16,11 +18,22 @@ pub type ResponseFuture =
 #[derive(Debug, Clone)]
 pub struct RemoteInfo {
     pub addr: SocketAddr,
+    pub scheme: Option<Scheme>,
+    pub host: Option<String>,
 }
 
 impl RemoteInfo {
     pub fn new(addr: SocketAddr) -> Self {
-        RemoteInfo { addr }
+        RemoteInfo {
+            addr,
+            scheme: None,
+            host: None,
+        }
+    }
+
+    pub fn setup(&mut self, req: &HyperRequest) {
+        self.scheme = req.uri().scheme().map(|s| s.clone());
+        self.host = req.uri().host().map(|h| h.to_string());
     }
 }
 
@@ -45,6 +58,20 @@ pub fn append_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
         X_REAL_IP,
         HeaderValue::from_str(&info.addr.ip().to_string()).expect("HeaderValue failed"),
     );
+
+    if let Some(ref scheme) = info.scheme {
+        req.headers_mut().insert(
+            X_FORWARDED_PROTO,
+            HeaderValue::from_str(scheme.as_str()).expect("HeaderValue failed"),
+        );
+    }
+
+    if let Some(ref host) = info.host {
+        req.headers_mut().insert(
+            X_FORWARDED_HOST,
+            HeaderValue::from_str(&host).expect("HeaderValue failed"),
+        );
+    }
 }
 
 pub fn not_found() -> HyperResponse {

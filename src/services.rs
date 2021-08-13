@@ -8,7 +8,8 @@ use std::{
 
 use arc_swap::{ArcSwap, Cache};
 use futures::Future;
-use hyper::{http::uri::Authority, Uri};
+use headers::HeaderValue;
+use hyper::{header::HOST, http::uri::Authority, Uri};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, error};
@@ -62,10 +63,12 @@ impl GatewayService {
         upstreams: &HashMap<String, Arc<RwLock<Upstream>>>,
         mut req: HyperRequest,
     ) -> HyperResponse {
-        let info = req
+        let mut info = req
             .extensions_mut()
             .remove::<RemoteInfo>()
             .expect("RemoteInfo must exist");
+
+        info.setup(&req);
 
         let remote_addr = info.addr;
 
@@ -112,6 +115,11 @@ impl GatewayService {
         }
 
         append_proxy_headers(&mut req, &info);
+
+        // set host, use upstream host
+        let host = req.uri().host().expect("get host failed");
+        let host = HeaderValue::from_str(host).expect("HeaderValue failed");
+        req.headers_mut().insert(HOST, host);
 
         let mut resp = match Service::call(&mut client, req).await {
             Ok(resp) => resp,

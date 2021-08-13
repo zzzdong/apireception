@@ -150,6 +150,7 @@ impl RuntimeConfig {
 pub struct SharedData {
     pub router: PathRouter,
     pub upstreams: HashMap<String, Arc<RwLock<Upstream>>>,
+    pub config: Config,
 }
 
 impl SharedData {
@@ -167,14 +168,17 @@ impl SharedData {
             let route = Route::new(r, upstreams.clone())?;
 
             for uri in &r.uris {
-                router.add_or_update_with(uri, vec![route.clone()], |routes| {
-                    routes.push(route.clone());
-                    routes.sort_unstable_by_key(|r| Reverse(r.priority))
-                });
+                let endpoint = router.at_or_default(uri);
+                endpoint.push(route.clone());
+                endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
             }
         }
 
-        Ok(SharedData { router, upstreams })
+        Ok(SharedData {
+            router,
+            upstreams,
+            config: cfg.clone(),
+        })
     }
 }
 

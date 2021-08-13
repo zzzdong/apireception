@@ -1,3 +1,4 @@
+mod adminapi;
 mod config;
 mod context;
 mod error;
@@ -45,9 +46,10 @@ async fn run() -> Result<()> {
     let (tx, watch) = drain::channel();
 
     let http_addr = rtcfg.http_addr;
+    let shared_data = rtcfg.shared_data.clone();
 
     tokio::spawn(async move {
-        let srv = Server::new(rtcfg.shared_data);
+        let srv = Server::new(shared_data.clone());
         let ret = srv.run(http_addr, watch).await;
 
         match ret {
@@ -60,6 +62,8 @@ async fn run() -> Result<()> {
             }
         }
     });
+
+    tokio::spawn(async move { adminapi::run(rtcfg.shared_data.clone()).await });
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

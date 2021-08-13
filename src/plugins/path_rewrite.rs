@@ -10,6 +10,7 @@ use crate::error::ConfigError;
 use super::Plugin;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PathRewriteConfig {
     Keep,
     Static(String),
