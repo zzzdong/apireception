@@ -41,15 +41,19 @@ async fn run() -> Result<()> {
 
     tracing::debug!(?cfg, "load config done");
 
-    let rtcfg = RuntimeConfig::new(&cfg)?;
+    let rtcfg = RuntimeConfig::new(cfg)?;
 
     let (tx, watch) = drain::channel();
 
     let http_addr = rtcfg.http_addr;
+    let config = rtcfg.config.clone();
     let shared_data = rtcfg.shared_data.clone();
+    let shared_data_cloned = shared_data.clone();
+
+    let config_notify = rtcfg.start_watch_config();
 
     tokio::spawn(async move {
-        let srv = Server::new(shared_data.clone());
+        let srv = Server::new(shared_data_cloned);
         let ret = srv.run(http_addr, watch).await;
 
         match ret {
@@ -63,7 +67,9 @@ async fn run() -> Result<()> {
         }
     });
 
-    tokio::spawn(async move { adminapi::run(rtcfg.shared_data.clone()).await });
+    tokio::spawn(
+        async move { adminapi::run(config.clone(), shared_data.clone(), config_notify).await },
+    );
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

@@ -10,8 +10,9 @@ use hyper::StatusCode;
 use lieweb::{middleware::Middleware, Cookie, Error, Request, Response};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 
-use crate::config::{RouteConfig, SharedData};
+use crate::config::{Config, RouteConfig, SharedData};
 
 const ALLOWED_ADMIN: (&str, &str) = ("admin", "admin");
 const SESSION_COOKIE_NAME: &str = "sid";
@@ -50,9 +51,9 @@ impl IResponse<Option<()>> {
     }
 }
 
-impl<T: Serialize> Into<Response> for IResponse<T> {
-    fn into(self) -> Response {
-        Response::with_json(&self)
+impl<T: Serialize> From<IResponse<T>> for Response {
+    fn from(r: IResponse<T>) -> Self {
+        Response::with_json(&r)
     }
 }
 
@@ -71,10 +72,14 @@ async fn login(mut req: Request) -> Result<Response, Error> {
     let login_req: LoginReq = req.read_json().await?;
 
     if login_req.username == ALLOWED_ADMIN.0 && login_req.password == ALLOWED_ADMIN.1 {
-        let login_name = login_req.username.clone();
+        let login_name = login_req.username;
 
         let sid = rand::thread_rng().gen::<[u8; 8]>();
-        let sid = sid.iter().map(|b|format!("{:02x?}", b)).collect::<Vec<String>>().join("");
+        let sid = sid
+            .iter()
+            .map(|b| format!("{:02x?}", b))
+            .collect::<Vec<String>>()
+            .join("");
 
         G_SESSION_STORE
             .clone()
@@ -84,9 +89,7 @@ async fn login(mut req: Request) -> Result<Response, Error> {
 
         let cookie = Cookie::new(SESSION_COOKIE_NAME, sid);
 
-        let data = LoginResp {
-            login_name: login_name,
-        };
+        let data = LoginResp { login_name };
         let resp: Response = IResponse::new(data).into();
 
         return Ok(resp.append_cookie(cookie));
@@ -114,33 +117,91 @@ struct RouteApi;
 impl RouteApi {
     pub fn get_detail(req: Request) -> Result<Option<RouteConfig>, Error> {
         let route_id: String = req.get_param("id")?;
-        let app_ctx = req.get_state::<AppContext>().expect("AppContext not found");
 
-        let route = app_ctx
-            .shared_data
-            .load_full()
+        let config = req
+            .get_state::<AppContext>()
+            .expect("AppContext not found")
             .config
-            .routes
-            .iter()
-            .find(|r| r.id == route_id)
-            .cloned();
+            .read()
+            .unwrap();
+
+        let route = config.routes.iter().find(|r| r.id == route_id).cloned();
 
         Ok(route)
     }
 
     pub fn get_list(req: Request) -> Result<Vec<RouteConfig>, Error> {
-        let app_ctx = req.get_state::<AppContext>().expect("AppContext not found");
+        let config = req
+            .get_state::<AppContext>()
+            .expect("AppContext not found")
+            .config
+            .read()
+            .unwrap();
 
-        Ok(app_ctx.shared_data.load_full().config.routes.clone())
+        Ok(config.routes.clone())
+    }
+
+    pub async fn add(mut req: Request) -> Result<String, Error> {
+        let route: RouteConfig = req.read_json().await?;
+
+        let mut config = req
+            .get_state::<AppContext>()
+            .expect("AppContext not found")
+            .config
+            .write()
+            .unwrap();
+
+        if config.routes.iter().any(|r| r.id == route.id) {
+            return Err(Error::Message("Route Id exist".to_string()));
+        }
+
+        let route_id = route.id.clone();
+
+        config.routes.push(route);
+
+        req.get_state::<AppContext>()
+            .expect("AppContext not found")
+            .config_notify
+            .notify_one();
+
+        Ok(route_id)
+    }
+
+    pub async fn update(mut req: Request) -> Result<String, Error> {
+        let route: RouteConfig = req.read_json().await?;
+
+        let mut config = req
+            .get_state::<AppContext>()
+            .expect("AppContext not found")
+            .config
+            .write()
+            .unwrap();
+
+        let route_id = route.id.clone();
+
+        match config.routes.iter_mut().find(|r| r.id == route.id) {
+            Some(r) => {
+                let _ = std::mem::replace(r, route);
+            }
+            None => {
+                return Err(Error::Message("Route Id not exist".to_string()));
+            }
+        }
+
+        req.get_state::<AppContext>()
+            .expect("AppContext not found")
+            .config_notify
+            .notify_one();
+
+        Ok(route_id)
     }
 }
 
-fn wrap_response<F, Resp>(f: F) -> impl Fn(Request) -> Response
+fn wrap_response<Resp>(resp: Result<Resp, Error>) -> Response
 where
-    F: Fn(Request) -> Result<Resp, Error>,
     Resp: Serialize,
 {
-    move |req| match f(req) {
+    match resp {
         Ok(data) => {
             let resp = IResponse::new(data);
             Response::with_json(&resp)
@@ -166,7 +227,7 @@ impl Middleware for AuthMiddleware {
                     session.load(cookie).cloned()
                 };
 
-                if let Some(session) = session {
+                if let Some(_session) = session {
                     let resp = next.run(req).await;
                     return resp;
                 }
@@ -205,11 +266,21 @@ impl<T> SessionStore<T> {
 
 #[derive(Clone)]
 struct AppContext {
+    config: Arc<RwLock<Config>>,
+    config_notify: Arc<Notify>,
     shared_data: Arc<ArcSwap<SharedData>>,
 }
 
-pub async fn run(shared_data: Arc<ArcSwap<SharedData>>) {
-    let app_ctx = AppContext { shared_data };
+pub async fn run(
+    config: Arc<RwLock<Config>>,
+    shared_data: Arc<ArcSwap<SharedData>>,
+    config_notify: Arc<Notify>,
+) {
+    let app_ctx = AppContext {
+        config,
+        config_notify,
+        shared_data,
+    };
 
     let mut app = lieweb::App::with_state(app_ctx);
 
@@ -224,11 +295,19 @@ pub async fn run(shared_data: Arc<ArcSwap<SharedData>>) {
     });
 
     app.get("/api/routes", |req: Request| async move {
-        wrap_response(RouteApi::get_list)(req)
+        wrap_response(RouteApi::get_list(req))
     });
 
     app.get("/api/routes/:id", |req: Request| async move {
-        wrap_response(RouteApi::get_detail)(req)
+        wrap_response(RouteApi::get_detail(req))
+    });
+
+    app.put("/api/routes/:id", |req| async move {
+        wrap_response(RouteApi::update(req).await)
+    });
+
+    app.post("/api/routes/:id", |req| async move {
+        wrap_response(RouteApi::add(req).await)
     });
 
     app.run("0.0.0.0:8000").await.unwrap();

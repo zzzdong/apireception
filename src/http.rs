@@ -32,7 +32,7 @@ impl RemoteInfo {
     }
 
     pub fn setup(&mut self, req: &HyperRequest) {
-        self.scheme = req.uri().scheme().map(|s| s.clone());
+        self.scheme = req.uri().scheme().cloned();
         self.host = req.uri().host().map(|h| h.to_string());
     }
 }
@@ -69,7 +69,7 @@ pub fn append_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
     if let Some(ref host) = info.host {
         req.headers_mut().insert(
             X_FORWARDED_HOST,
-            HeaderValue::from_str(&host).expect("HeaderValue failed"),
+            HeaderValue::from_str(host).expect("HeaderValue failed"),
         );
     }
 }

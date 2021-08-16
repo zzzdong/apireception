@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use drain::Watch;
 use hyper::server::conn::Http;
-use lieweb::{Request, Response};
 use tokio::net::TcpListener;
 use tower::Service;
 use tracing::Instrument;
@@ -64,5 +63,3 @@ impl Server {
         Ok(())
     }
 }
-
-

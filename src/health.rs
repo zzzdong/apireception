@@ -4,7 +4,6 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
-use futures::TryFutureExt;
 use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_rustls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;
@@ -78,12 +77,10 @@ async fn detect_endpoint_health(
             let take = begin.elapsed();
             if take > Duration::from_secs(cfg.slow_threshold) {
                 Healthiness::Slow(take)
+            } else if resp.status().is_success() {
+                Healthiness::Healthly
             } else {
-                if resp.status().is_success() {
-                    Healthiness::Healthly
-                } else {
-                    Healthiness::Unresponsive(Some(resp.status()))
-                }
+                Healthiness::Unresponsive(Some(resp.status()))
             }
         }
         Err(err) => Healthiness::Unresponsive(None),

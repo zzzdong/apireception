@@ -3,7 +3,6 @@ use std::convert::TryFrom;
 use hyper::{http::uri::PathAndQuery, Uri};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::error::ConfigError;
 

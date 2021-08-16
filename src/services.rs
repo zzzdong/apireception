@@ -46,8 +46,7 @@ impl GatewayService {
             Ok(m) => {
                 let routes = *m.handler();
 
-                let routes: Vec<&Route> =
-                    routes.iter().filter(|r| r.matcher.matchs(&req)).collect();
+                let routes: Vec<&Route> = routes.iter().filter(|r| r.matcher.matchs(req)).collect();
 
                 routes.first().cloned()
             }

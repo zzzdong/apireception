@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{error::ConfigError, http::HyperRequest, matcher::RouteMatcher};
 

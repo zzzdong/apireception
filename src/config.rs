@@ -4,11 +4,13 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
+    time::SystemTime,
 };
 
 use arc_swap::ArcSwap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::Notify;
 use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
 
 use crate::error::{unsupport_file, ConfigError};
@@ -103,7 +105,7 @@ impl Config {
         Ok(cfg)
     }
 
-    pub fn dumps(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+    pub fn dump(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -125,6 +127,7 @@ impl Config {
 }
 
 pub struct RuntimeConfig {
+    pub config: Arc<RwLock<Config>>,
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
     pub certificates: Arc<HashMap<DNSName, CertifiedKey>>,
@@ -132,25 +135,70 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    pub fn new(cfg: &Config) -> Result<Self, ConfigError> {
+    pub fn new(cfg: Config) -> Result<Self, ConfigError> {
         let http_addr = cfg.server.http_addr.parse()?;
         let https_addr = cfg.server.https_addr.parse()?;
         let certificates = Arc::new(HashMap::new());
-        let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(cfg)?));
+        let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(&cfg)?));
+        let config = Arc::new(RwLock::new(cfg));
 
         Ok(RuntimeConfig {
+            config,
             http_addr,
             https_addr,
             shared_data,
             certificates,
         })
     }
+
+    pub fn start_watch_config(&self) -> Arc<Notify> {
+        let notify = Arc::new(Notify::new());
+
+        let notify_cloned = notify.clone();
+
+        let config = self.config.clone();
+        let shared_data = self.shared_data.clone();
+
+        tokio::spawn(async move {
+            loop {
+                notify_cloned.notified().await;
+
+                Self::apply_config(config.clone(), shared_data.clone());
+            }
+        });
+
+        notify
+    }
+
+    pub fn apply_config(config: Arc<RwLock<Config>>, shared_data: Arc<ArcSwap<SharedData>>) {
+        let cfg = config.read().unwrap();
+        match SharedData::new(&cfg) {
+            Ok(new_shared) => {
+                shared_data.store(Arc::new(new_shared));
+            }
+            Err(err) => {
+                tracing::error!(%err, "apply config failed")
+            }
+        }
+
+        let mut path = std::env::temp_dir();
+        let filename = format!(
+            "apireception-config-{:?}.yaml",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+
+        path.push(filename);
+
+        cfg.dump(path).unwrap();
+    }
 }
 
 pub struct SharedData {
     pub router: PathRouter,
     pub upstreams: HashMap<String, Arc<RwLock<Upstream>>>,
-    pub config: Config,
 }
 
 impl SharedData {
@@ -174,11 +222,7 @@ impl SharedData {
             }
         }
 
-        Ok(SharedData {
-            router,
-            upstreams,
-            config: cfg.clone(),
-        })
+        Ok(SharedData { router, upstreams })
     }
 }
 
@@ -331,6 +375,6 @@ mod test {
             ],
         };
 
-        cfg.dumps("config.yaml").unwrap();
+        cfg.dump("config.yaml").unwrap();
     }
 }

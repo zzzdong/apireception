@@ -32,7 +32,7 @@ impl Route {
         let mut plugins = Vec::new();
 
         for (name, config) in &cfg.plugins {
-            let p = init_plugin(&name, config.config.clone())?;
+            let p = init_plugin(name, config.config.clone())?;
             plugins.push(p);
         }
 
