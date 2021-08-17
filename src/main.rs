@@ -20,7 +20,7 @@ pub use error::{Error, Result};
 
 use server::Server;
 
-use crate::config::RuntimeConfig;
+use crate::{adminapi::AdminApi, config::RuntimeConfig};
 
 #[tokio::main]
 async fn main() {
@@ -45,16 +45,13 @@ async fn run() -> Result<()> {
 
     let (tx, watch) = drain::channel();
 
-    let http_addr = rtcfg.http_addr;
-    let config = rtcfg.config.clone();
-    let shared_data = rtcfg.shared_data.clone();
-    let shared_data_cloned = shared_data.clone();
+    rtcfg.start_watch_config();
 
-    let config_notify = rtcfg.start_watch_config();
+    let rtcfg_cloned = rtcfg.clone();
 
     tokio::spawn(async move {
-        let srv = Server::new(shared_data_cloned);
-        let ret = srv.run(http_addr, watch).await;
+        let srv = Server::new(rtcfg_cloned.shared_data);
+        let ret = srv.run(rtcfg_cloned.http_addr, watch).await;
 
         match ret {
             Ok(_) => {
@@ -67,9 +64,17 @@ async fn run() -> Result<()> {
         }
     });
 
-    tokio::spawn(
-        async move { adminapi::run(config.clone(), shared_data.clone(), config_notify).await },
-    );
+    tokio::spawn(async move {
+        let adminapi = AdminApi::new(rtcfg);
+        match adminapi.run().await {
+            Ok(_) => {
+                tracing::info!("adminapi server done");
+            }
+            Err(err) => {
+                tracing::error!(?err, "adminapi server error");
+            }
+        }
+    });
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

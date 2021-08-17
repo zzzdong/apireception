@@ -126,12 +126,14 @@ impl Config {
     }
 }
 
+#[derive(Clone)]
 pub struct RuntimeConfig {
-    pub config: Arc<RwLock<Config>>,
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
     pub certificates: Arc<HashMap<DNSName, CertifiedKey>>,
     pub shared_data: Arc<ArcSwap<SharedData>>,
+    pub config: Arc<RwLock<Config>>,
+    pub config_notify: Arc<Notify>,
 }
 
 impl RuntimeConfig {
@@ -141,33 +143,30 @@ impl RuntimeConfig {
         let certificates = Arc::new(HashMap::new());
         let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(&cfg)?));
         let config = Arc::new(RwLock::new(cfg));
+        let config_notify = Arc::new(Notify::new());
 
         Ok(RuntimeConfig {
-            config,
             http_addr,
             https_addr,
             shared_data,
             certificates,
+            config,
+            config_notify,
         })
     }
 
-    pub fn start_watch_config(&self) -> Arc<Notify> {
-        let notify = Arc::new(Notify::new());
-
-        let notify_cloned = notify.clone();
-
+    pub fn start_watch_config(&self) {
         let config = self.config.clone();
+        let notify = self.config_notify.clone();
         let shared_data = self.shared_data.clone();
 
         tokio::spawn(async move {
             loop {
-                notify_cloned.notified().await;
+                notify.notified().await;
 
                 Self::apply_config(config.clone(), shared_data.clone());
             }
         });
-
-        notify
     }
 
     pub fn apply_config(config: Arc<RwLock<Config>>, shared_data: Arc<ArcSwap<SharedData>>) {
