@@ -8,6 +8,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use drain::Watch;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Notify;
@@ -23,8 +24,25 @@ use crate::{
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
+    #[serde(default)]
     pub routes: Vec<RouteConfig>,
+    #[serde(default)]
     pub upstreams: Vec<UpstreamConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct AdminConfig {
+    pub enable: bool,
+    pub adminapi_addr: String,
+    pub users: Vec<User>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct User {
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -43,6 +61,7 @@ pub struct TlsConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RouteConfig {
+    #[serde(default)]
     pub id: String,
     pub name: String,
     pub desc: String,
@@ -65,6 +84,7 @@ pub struct PluginConfig {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct UpstreamConfig {
+    #[serde(default)]
     pub id: String,
     pub name: String,
     pub desc: String,
@@ -82,7 +102,45 @@ pub struct Endpoint {
 }
 
 impl Config {
-    pub fn load(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
+    // pub async fn load_db(&mut self, db: Database) -> Result<(), ConfigError> {
+    //     // load routes
+    //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
+
+    //     let cursor = routes_col.find(None, None).await?;
+
+    //     let routes: Vec<RouteConfig> = cursor.try_collect().await?;
+
+    //     self.routes = routes;
+
+    //     // load upstreams
+    //     let upstreams_col = db.collection::<UpstreamConfig>(COL_UPSTREAMS);
+
+    //     let cursor = upstreams_col.find(None, None).await?;
+
+    //     let upstreams: Vec<UpstreamConfig> = cursor.try_collect().await?;
+
+    //     self.upstreams = upstreams;
+
+    //     Ok(())
+    // }
+
+    // pub async fn dump_db(&mut self, db: Database) -> Result<(), ConfigError> {
+    //     // insert routes
+    //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
+
+    //     let _ret = routes_col.insert_many(self.routes.clone(), None).await?;
+
+    //     // insert upstreams
+    //     let upstreams_col = db.collection::<UpstreamConfig>(COL_UPSTREAMS);
+
+    //     let _ret = upstreams_col
+    //         .insert_many(self.upstreams.clone(), None)
+    //         .await?;
+
+    //     Ok(())
+    // }
+
+    pub fn load_file(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -105,7 +163,7 @@ impl Config {
         Ok(cfg)
     }
 
-    pub fn dump(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+    pub fn dump_file(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -130,16 +188,23 @@ impl Config {
 pub struct RuntimeConfig {
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
+    pub adminapi_addr: Option<SocketAddr>,
     pub certificates: Arc<HashMap<DNSName, CertifiedKey>>,
     pub shared_data: Arc<ArcSwap<SharedData>>,
     pub config: Arc<RwLock<Config>>,
     pub config_notify: Arc<Notify>,
+    pub watch: Watch,
 }
 
 impl RuntimeConfig {
-    pub fn new(cfg: Config) -> Result<Self, ConfigError> {
+    pub async fn new(cfg: Config, watch: Watch) -> Result<Self, ConfigError> {
         let http_addr = cfg.server.http_addr.parse()?;
         let https_addr = cfg.server.https_addr.parse()?;
+        let adminapi_addr = if cfg.admin.enable {
+            Some(cfg.admin.adminapi_addr.parse::<SocketAddr>()?)
+        } else {
+            None
+        };
         let certificates = Arc::new(HashMap::new());
         let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(&cfg)?));
         let config = Arc::new(RwLock::new(cfg));
@@ -148,10 +213,12 @@ impl RuntimeConfig {
         Ok(RuntimeConfig {
             http_addr,
             https_addr,
+            adminapi_addr,
             shared_data,
             certificates,
             config,
             config_notify,
+            watch,
         })
     }
 
@@ -191,7 +258,7 @@ impl RuntimeConfig {
 
         path.push(filename);
 
-        cfg.dump(path).unwrap();
+        cfg.dump_file(path).unwrap();
     }
 }
 
@@ -323,7 +390,14 @@ mod test {
                 .cloned()
                 .collect(),
             },
-
+            admin: AdminConfig {
+                enable: true,
+                adminapi_addr: "127.0.0.1:8000".to_string(),
+                users: vec![User {
+                    username: "admin".to_string(),
+                    password: "admin".to_string(),
+                }],
+            },
             routes: vec![
                 RouteConfig {
                     id: "hello".to_string(),
@@ -374,6 +448,22 @@ mod test {
             ],
         };
 
-        cfg.dump("config.yaml").unwrap();
+        cfg.dump_file("config.yaml").unwrap();
     }
+
+    // #[tokio::test]
+    // async fn dump_db() {
+    //     let mut cfg = Config::load_file("config.yaml").unwrap();
+
+    //     let db = Client::with_uri_str(&cfg.server.mongo_uri)
+    //         .await
+    //         .unwrap()
+    //         .database(DB_APIRECEPTION);
+
+    //     // TODO: add createIndex
+    //     // db.routes.createIndex({"id": 1}, {unique: true})
+    //     // db.upstreams.createIndex({"id": 1}, {unique: true})
+
+    //     cfg.dump_db(db).await.unwrap();
+    // }
 }

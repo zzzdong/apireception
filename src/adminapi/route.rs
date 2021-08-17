@@ -2,12 +2,12 @@ use lieweb::{Error, Request};
 
 use crate::config::RouteConfig;
 
-use super::AppContext;
+use super::{AppContext, status::Status};
 
 pub struct RouteApi;
 
 impl RouteApi {
-    pub fn get_detail(req: Request) -> Result<Option<RouteConfig>, Error> {
+    pub fn get_detail(req: Request) -> Result<Option<RouteConfig>, Status> {
         let route_id: String = req.get_param("id")?;
 
         let config = req
@@ -22,7 +22,7 @@ impl RouteApi {
         Ok(route)
     }
 
-    pub fn get_list(req: Request) -> Result<Vec<RouteConfig>, Error> {
+    pub fn get_list(req: Request) -> Result<Vec<RouteConfig>, Status> {
         let config = req
             .get_state::<AppContext>()
             .expect("AppContext not found")
@@ -33,7 +33,7 @@ impl RouteApi {
         Ok(config.routes.clone())
     }
 
-    pub async fn add(mut req: Request) -> Result<String, Error> {
+    pub async fn add(mut req: Request) -> Result<String, Status> {
         let route: RouteConfig = req.read_json().await?;
 
         let mut config = req
@@ -44,7 +44,7 @@ impl RouteApi {
             .unwrap();
 
         if config.routes.iter().any(|r| r.id == route.id) {
-            return Err(Error::Message("Route Id exist".to_string()));
+            return Err(Status::new(400, "Route Id exist"));
         }
 
         let route_id = route.id.clone();
@@ -59,7 +59,7 @@ impl RouteApi {
         Ok(route_id)
     }
 
-    pub async fn update(mut req: Request) -> Result<String, Error> {
+    pub async fn update(mut req: Request) -> Result<String, Status> {
         let route_id: String = req.get_param("id")?;
         let mut route: RouteConfig = req.read_json().await?;
 
@@ -77,7 +77,7 @@ impl RouteApi {
                 let _ = std::mem::replace(r, route);
             }
             None => {
-                return Err(Error::Message("Route Id not exist".to_string()));
+                return Err(Status::new(400, "Route Id exist"));
             }
         }
 

@@ -2,12 +2,12 @@ use lieweb::{Error, Request};
 
 use crate::config::UpstreamConfig;
 
-use super::AppContext;
+use super::{status::Status, AppContext};
 
 pub struct UpstreamApi;
 
 impl UpstreamApi {
-    pub fn get_detail(req: Request) -> Result<Option<UpstreamConfig>, Error> {
+    pub fn get_detail(req: Request) -> Result<Option<UpstreamConfig>, Status> {
         let upstream_id: String = req.get_param("id")?;
 
         let config = req
@@ -26,7 +26,7 @@ impl UpstreamApi {
         Ok(upstream)
     }
 
-    pub fn get_list(req: Request) -> Result<Vec<UpstreamConfig>, Error> {
+    pub fn get_list(req: Request) -> Result<Vec<UpstreamConfig>, Status> {
         let config = req
             .get_state::<AppContext>()
             .expect("AppContext not found")
@@ -37,7 +37,7 @@ impl UpstreamApi {
         Ok(config.upstreams.clone())
     }
 
-    pub async fn add(mut req: Request) -> Result<String, Error> {
+    pub async fn add(mut req: Request) -> Result<String, Status> {
         let upstream: UpstreamConfig = req.read_json().await?;
 
         let mut config = req
@@ -48,7 +48,7 @@ impl UpstreamApi {
             .unwrap();
 
         if config.upstreams.iter().any(|up| up.id == upstream.id) {
-            return Err(Error::Message("Route Id exist".to_string()));
+            return Err(Status::new(401, "Upstream Id exist"));
         }
 
         let upstream_id = upstream.id.clone();
@@ -63,7 +63,7 @@ impl UpstreamApi {
         Ok(upstream_id)
     }
 
-    pub async fn update(mut req: Request) -> Result<String, Error> {
+    pub async fn update(mut req: Request) -> Result<String, Status> {
         let upstream_id: String = req.get_param("id")?;
         let mut upstream: UpstreamConfig = req.read_json().await?;
         upstream.id = upstream_id.clone();
@@ -82,7 +82,7 @@ impl UpstreamApi {
                 let _ = std::mem::replace(up, upstream);
             }
             None => {
-                return Err(Error::Message("Route Id not exist".to_string()));
+                return Err(Status::new(400, "Upstream Id exist"));
             }
         }
 

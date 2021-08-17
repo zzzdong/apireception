@@ -9,9 +9,11 @@ use std::{
     time::Duration,
 };
 
-use lieweb::{middleware::Middleware, Cookie, Error, Request, Response};
+use lieweb::{middleware::Middleware, Cookie, Request, Response};
 
 use crate::adminapi::IResponse;
+
+use super::status::Status;
 
 const ALLOWED_ADMIN: (&str, &str) = ("admin", "admin");
 const SESSION_COOKIE_NAME: &str = "sid";
@@ -73,7 +75,7 @@ impl Middleware for AuthMiddleware {
 pub struct SessionApi;
 
 impl SessionApi {
-    pub async fn login(mut req: Request) -> Result<Response, Error> {
+    pub async fn login(mut req: Request) -> Result<Response, lieweb::Error> {
         let login_req: LoginReq = req.read_json().await?;
 
         if login_req.username == ALLOWED_ADMIN.0 && login_req.password == ALLOWED_ADMIN.1 {
@@ -103,7 +105,7 @@ impl SessionApi {
         Ok(StatusCode::UNAUTHORIZED.into())
     }
 
-    pub async fn logout(req: Request) -> Result<Response, Error> {
+    pub async fn logout(req: Request) -> Result<Response, lieweb::Error> {
         if let Ok(ref cookie) = req.get_cookie(SESSION_COOKIE_NAME) {
             G_SESSION_STORE.clone().write().unwrap().delete(cookie);
         }

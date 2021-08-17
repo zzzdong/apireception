@@ -7,6 +7,12 @@ server:
     www.example.com:
       cert_path: example.cert
       key_path: example.key
+admin:
+  enable: true
+  adminapi_addr: "127.0.0.1:8000"
+  users:
+    - username: admin
+      password: admin
 routes:
   - id: hello
     name: hello

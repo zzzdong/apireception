@@ -37,13 +37,12 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let cfg = config::Config::load("config.yaml")?;
+    let cfg = config::Config::load_file("config.yaml")?;
 
     tracing::debug!(?cfg, "load config done");
 
-    let rtcfg = RuntimeConfig::new(cfg)?;
-
     let (tx, watch) = drain::channel();
+    let rtcfg = RuntimeConfig::new(cfg, watch).await?;
 
     rtcfg.start_watch_config();
 
@@ -51,7 +50,7 @@ async fn run() -> Result<()> {
 
     tokio::spawn(async move {
         let srv = Server::new(rtcfg_cloned.shared_data);
-        let ret = srv.run(rtcfg_cloned.http_addr, watch).await;
+        let ret = srv.run(rtcfg_cloned.http_addr, rtcfg_cloned.watch).await;
 
         match ret {
             Ok(_) => {
@@ -64,17 +63,19 @@ async fn run() -> Result<()> {
         }
     });
 
-    tokio::spawn(async move {
-        let adminapi = AdminApi::new(rtcfg);
-        match adminapi.run().await {
-            Ok(_) => {
-                tracing::info!("adminapi server done");
+    if rtcfg.config.read().unwrap().admin.enable {
+        tokio::spawn(async move {
+            let adminapi = AdminApi::new(rtcfg);
+            match adminapi.run().await {
+                Ok(_) => {
+                    tracing::info!("adminapi server done");
+                }
+                Err(err) => {
+                    tracing::error!(?err, "adminapi server error");
+                }
             }
-            Err(err) => {
-                tracing::error!(?err, "adminapi server error");
-            }
-        }
-    });
+        });
+    }
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {

@@ -1,5 +1,6 @@
 mod route;
 mod session;
+mod status;
 mod upstream;
 
 use std::sync::{Arc, RwLock};
@@ -15,6 +16,7 @@ use crate::config::{Config, RuntimeConfig, SharedData};
 use self::{
     route::RouteApi,
     session::{AuthMiddleware, SessionApi},
+    status::Status,
     upstream::UpstreamApi,
 };
 
@@ -48,13 +50,19 @@ impl IResponse<Option<()>> {
     }
 }
 
+impl From<Status> for IResponse<Option<()>> {
+    fn from(s: Status) -> Self {
+        IResponse::with_error(s.code, s.message)
+    }
+}
+
 impl<T: Serialize> From<IResponse<T>> for Response {
     fn from(r: IResponse<T>) -> Self {
         Response::with_json(&r)
     }
 }
 
-fn wrap_response<Resp>(resp: Result<Resp, Error>) -> Response
+fn wrap_response<Resp>(resp: Result<Resp, Status>) -> Response
 where
     Resp: Serialize,
 {
@@ -64,8 +72,8 @@ where
             Response::with_json(&resp)
         }
         Err(err) => {
-            tracing::error!(%err, "handle request failed");
-            let resp = IResponse::with_error(-1, err);
+            tracing::error!(?err, "handle request failed");
+            let resp = IResponse::with_error(err.code, err.message);
             Response::with_json(&resp).set_status(StatusCode::BAD_REQUEST)
         }
     }
@@ -92,6 +100,7 @@ impl AdminApi {
             config,
             shared_data,
             config_notify,
+            adminapi_addr,
             ..
         } = self.rtcfg;
 
@@ -145,6 +154,6 @@ impl AdminApi {
             wrap_response(UpstreamApi::update(req).await)
         });
 
-        app.run("0.0.0.0:8000").await
+        app.run(adminapi_addr.unwrap()).await
     }
 }
