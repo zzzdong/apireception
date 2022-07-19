@@ -1,51 +1,39 @@
-use lieweb::{Error, Request};
+use lieweb::{AppState, LieRequest, PathParam, Request};
 
 use crate::config::UpstreamConfig;
 
-use super::{status::Status, AppContext};
+use super::{status::Status, ApiResult, AppContext, IdParam};
 
 pub struct UpstreamApi;
 
 impl UpstreamApi {
-    pub fn get_detail(req: Request) -> Result<Option<UpstreamConfig>, Status> {
-        let upstream_id: String = req.get_param("id")?;
+    pub async fn get_detail(
+        app_ctx: AppState<AppContext>,
+        param: PathParam<IdParam>,
+    ) -> ApiResult<Option<UpstreamConfig>> {
+        let upstream_id = &param.value().id;
 
-        let config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .read()
-            .unwrap();
+        let config = app_ctx.config.read().unwrap();
 
         let upstream = config
             .upstreams
             .iter()
-            .find(|up| up.id == upstream_id)
+            .find(|up| &up.id == upstream_id)
             .cloned();
 
-        Ok(upstream)
+        Ok(upstream.into())
     }
 
-    pub fn get_list(req: Request) -> Result<Vec<UpstreamConfig>, Status> {
-        let config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .read()
-            .unwrap();
+    pub async fn get_list(app_ctx: AppState<AppContext>) -> ApiResult<Vec<UpstreamConfig>> {
+        let config = app_ctx.config.read().unwrap();
 
-        Ok(config.upstreams.clone())
+        Ok(config.upstreams.clone().into())
     }
 
-    pub async fn add(mut req: Request) -> Result<String, Status> {
+    pub async fn add(app_ctx: AppState<AppContext>, mut req: Request) -> Result<String, Status> {
         let upstream: UpstreamConfig = req.read_json().await?;
 
-        let mut config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .write()
-            .unwrap();
+        let mut config = app_ctx.config.write().unwrap();
 
         if config.upstreams.iter().any(|up| up.id == upstream.id) {
             return Err(Status::new(401, "Upstream Id exist"));
@@ -55,25 +43,21 @@ impl UpstreamApi {
 
         config.upstreams.push(upstream);
 
-        req.get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config_notify
-            .notify_one();
+        app_ctx.config_notify.notify_one();
 
         Ok(upstream_id)
     }
 
-    pub async fn update(mut req: Request) -> Result<String, Status> {
-        let upstream_id: String = req.get_param("id")?;
+    pub async fn update(
+        app_ctx: AppState<AppContext>,
+        param: PathParam<IdParam>,
+        mut req: Request,
+    ) -> Result<String, Status> {
+        let upstream_id = &param.value().id;
         let mut upstream: UpstreamConfig = req.read_json().await?;
         upstream.id = upstream_id.clone();
 
-        let mut config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .write()
-            .unwrap();
+        let mut config = app_ctx.config.write().unwrap();
 
         let upstream_id = upstream.id.clone();
 
@@ -86,10 +70,7 @@ impl UpstreamApi {
             }
         }
 
-        req.get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config_notify
-            .notify_one();
+        app_ctx.config_notify.notify_one();
 
         Ok(upstream_id)
     }

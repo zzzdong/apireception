@@ -1,12 +1,10 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::config::RouteConfig;
-use crate::error::{upstream_not_found, ConfigError};
+use crate::error::ConfigError;
 use crate::matcher::RouteMatcher;
 use crate::plugins::{init_plugin, Plugin};
-use crate::upstream::Upstream;
 
 pub type PathRouter = route_recognizer::Router<Vec<Route>>;
 
@@ -19,15 +17,8 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn new(
-        cfg: &RouteConfig,
-        upstreams: HashMap<String, Arc<RwLock<Upstream>>>,
-    ) -> Result<Route, ConfigError> {
+    pub fn new(cfg: &RouteConfig) -> Result<Route, ConfigError> {
         let matcher = RouteMatcher::parse(&cfg.matcher)?;
-
-        if upstreams.get(&cfg.upstream_id).is_none() {
-            return Err(upstream_not_found(&cfg.upstream_id));
-        }
 
         let mut plugins = Vec::new();
 

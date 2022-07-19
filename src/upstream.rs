@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
-use arc_swap::ArcSwap;
 use hyper::http::uri::{Scheme, Uri};
 use rand::{thread_rng, Rng};
 
@@ -12,11 +11,13 @@ use crate::error::ConfigError;
 use crate::health::{HealthConfig, Healthiness};
 use crate::http_client::GatewayClient;
 
+pub type UpstreamMap = HashMap<String, Arc<RwLock<Upstream>>>;
+
 pub struct Upstream {
     pub name: String,
     pub scheme: Scheme,
     pub client: GatewayClient,
-    pub endpoints: Vec<(Endpoint, ArcSwap<Healthiness>)>,
+    pub endpoints: Vec<(Endpoint, Arc<RwLock<Healthiness>>)>,
     pub health_config: HealthConfig,
 }
 
@@ -25,7 +26,7 @@ impl Upstream {
         let endpoints = cfg
             .endpoints
             .iter()
-            .map(|ep| (ep.clone(), ArcSwap::new(Arc::new(Healthiness::Healthly))))
+            .map(|ep| (ep.clone(), Arc::new(RwLock::new(Healthiness::Up))))
             .collect();
 
         let scheme = if cfg.is_https {
@@ -54,25 +55,33 @@ impl Upstream {
         })
     }
 
-    pub fn heathy_endpoints(&self) -> Vec<&Endpoint> {
+    pub fn healthy_endpoints(&self) -> Vec<&Endpoint> {
         self.endpoints
             .iter()
             .filter(|(endpoint, healthiness)| {
-                (endpoint.weight != 0) && (healthiness.load().as_ref() == &Healthiness::Healthly)
+                (endpoint.weight != 0) && (*healthiness.read().unwrap() == Healthiness::Up)
             })
             .map(|(endpoint, _)| endpoint)
             .collect::<Vec<_>>()
     }
 
+    pub fn all_endpoints(&self) -> Vec<&Endpoint> {
+        self.endpoints
+            .iter()
+            .filter(|(endpoint, _healthiness)| endpoint.weight != 0)
+            .map(|(endpoint, _)| endpoint)
+            .collect::<Vec<_>>()
+    }
+
     pub fn select_upstream(&self, ctx: &GatewayContext) -> Option<String> {
-        let available_endpoints = &self.heathy_endpoints();
+        let mut available_endpoints = self.healthy_endpoints();
         if available_endpoints.is_empty() {
-            return None;
+            available_endpoints = self.all_endpoints();
         }
 
         let context = Context {
             remote_addr: &ctx.remote_addr,
-            upstream_addrs: available_endpoints,
+            upstream_addrs: &available_endpoints,
         };
 
         let endpoint = self.client.strategy.select_upstream(&context).to_string();

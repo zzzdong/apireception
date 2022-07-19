@@ -1,4 +1,5 @@
 use hyper::StatusCode;
+use lieweb::{LieRequest, LieResponse};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +12,7 @@ use std::{
 
 use lieweb::{middleware::Middleware, Cookie, Request, Response};
 
-use crate::adminapi::IResponse;
-
-use super::status::Status;
+use crate::adminapi::ApiResponse;
 
 const ALLOWED_ADMIN: (&str, &str) = ("admin", "admin");
 const SESSION_COOKIE_NAME: &str = "sid";
@@ -46,12 +45,22 @@ impl<T> SessionStore<T> {
     }
 }
 
-pub struct AuthMiddleware;
+pub struct AuthMiddleware {
+    login_path: String,
+}
+
+impl AuthMiddleware {
+    pub fn new(login_path: impl ToString) -> Self {
+        AuthMiddleware {
+            login_path: login_path.to_string(),
+        }
+    }
+}
 
 #[lieweb::async_trait]
 impl Middleware for AuthMiddleware {
     async fn handle<'a>(&'a self, req: Request, next: lieweb::middleware::Next<'a>) -> Response {
-        if req.path().split('/').last().unwrap_or_default() != "login" {
+        if req.path() != self.login_path {
             if let Ok(ref cookie) = req.get_cookie(SESSION_COOKIE_NAME) {
                 let session = {
                     let session_store = G_SESSION_STORE.clone();
@@ -68,7 +77,7 @@ impl Middleware for AuthMiddleware {
             return next.run(req).await;
         }
 
-        return StatusCode::UNAUTHORIZED.into();
+        return LieResponse::with_status(StatusCode::UNAUTHORIZED).into();
     }
 }
 
@@ -97,12 +106,12 @@ impl SessionApi {
             let cookie = Cookie::new(SESSION_COOKIE_NAME, sid);
 
             let data = LoginResp { login_name };
-            let resp: Response = IResponse::new(data).into();
+            let resp = LieResponse::with_json(&data).append_cookie(cookie).into();
 
-            return Ok(resp.append_cookie(cookie));
+            return Ok(resp);
         }
 
-        Ok(StatusCode::UNAUTHORIZED.into())
+        Ok(LieResponse::with_status(StatusCode::UNAUTHORIZED).into())
     }
 
     pub async fn logout(req: Request) -> Result<Response, lieweb::Error> {
@@ -114,9 +123,9 @@ impl SessionApi {
         let mut cookie = Cookie::new(SESSION_COOKIE_NAME, "");
         cookie.set_max_age(Some(max_age));
 
-        let resp = Response::with_status(StatusCode::OK);
+        let resp = LieResponse::with_status(StatusCode::OK).append_cookie(cookie);
 
-        Ok(resp.append_cookie(cookie))
+        Ok(resp.into())
     }
 }
 

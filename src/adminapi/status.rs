@@ -1,6 +1,6 @@
-use lieweb::Error;
+use lieweb::{response::IntoResponse, Error, LieResponse};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Status {
     pub code: i32,
     pub message: String,
@@ -32,5 +32,11 @@ impl From<lieweb::Error> for Status {
             Error::JsonError(_) | Error::QueryError(_) => Status::new(400, err),
             _ => Status::new(500, err),
         }
+    }
+}
+
+impl IntoResponse for Status {
+    fn into_response(self) -> lieweb::Response {
+        LieResponse::with_json(&self).into_response()
     }
 }

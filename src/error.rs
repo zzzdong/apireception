@@ -34,8 +34,6 @@ pub enum ConfigError {
     UpstreamNotFound(String),
     #[error("unknown strategy<{0}>")]
     UnknownLBStrategy(String),
-    // #[error("mongo error")]
-    // MongoError(#[from] mongodb::error::Error),
 }
 
 #[derive(Debug, PartialEq)]

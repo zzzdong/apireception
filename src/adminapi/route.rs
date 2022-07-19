@@ -1,47 +1,35 @@
-use lieweb::{Error, Request};
+use lieweb::{AppState, LieRequest, PathParam, Request};
 
 use crate::config::RouteConfig;
 
-use super::{AppContext, status::Status};
+use super::{status::Status, ApiResult, AppContext, IdParam};
 
 pub struct RouteApi;
 
 impl RouteApi {
-    pub fn get_detail(req: Request) -> Result<Option<RouteConfig>, Status> {
-        let route_id: String = req.get_param("id")?;
+    pub async fn get_detail(
+        app_ctx: AppState<AppContext>,
+        param: PathParam<IdParam>,
+    ) -> ApiResult<Option<RouteConfig>> {
+        let route_id = &param.value().id;
 
-        let config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .read()
-            .unwrap();
+        let config = app_ctx.config.read().unwrap();
 
-        let route = config.routes.iter().find(|r| r.id == route_id).cloned();
+        let route = config.routes.iter().find(|r| &r.id == route_id).cloned();
 
-        Ok(route)
+        Ok(route.into())
     }
 
-    pub fn get_list(req: Request) -> Result<Vec<RouteConfig>, Status> {
-        let config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .read()
-            .unwrap();
+    pub async fn get_list(app_ctx: AppState<AppContext>) -> ApiResult<Vec<RouteConfig>> {
+        let config = app_ctx.config.read().unwrap();
 
-        Ok(config.routes.clone())
+        Ok(config.routes.clone().into())
     }
 
-    pub async fn add(mut req: Request) -> Result<String, Status> {
+    pub async fn add(app_ctx: AppState<AppContext>, mut req: Request) -> ApiResult<String> {
         let route: RouteConfig = req.read_json().await?;
 
-        let mut config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .write()
-            .unwrap();
+        let mut config = app_ctx.config.write().unwrap();
 
         if config.routes.iter().any(|r| r.id == route.id) {
             return Err(Status::new(400, "Route Id exist"));
@@ -51,26 +39,22 @@ impl RouteApi {
 
         config.routes.push(route);
 
-        req.get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config_notify
-            .notify_one();
+        app_ctx.config_notify.notify_one();
 
-        Ok(route_id)
+        Ok(route_id.into())
     }
 
-    pub async fn update(mut req: Request) -> Result<String, Status> {
+    pub async fn update(
+        app_ctx: AppState<AppContext>,
+        param: PathParam<IdParam>,
+        mut req: Request,
+    ) -> ApiResult<String> {
         let route_id: String = req.get_param("id")?;
         let mut route: RouteConfig = req.read_json().await?;
 
         route.id = route_id.clone();
 
-        let mut config = req
-            .get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config
-            .write()
-            .unwrap();
+        let mut config = app_ctx.config.write().unwrap();
 
         match config.routes.iter_mut().find(|r| r.id == route.id) {
             Some(r) => {
@@ -81,11 +65,8 @@ impl RouteApi {
             }
         }
 
-        req.get_state::<AppContext>()
-            .expect("AppContext not found")
-            .config_notify
-            .notify_one();
+        app_ctx.config_notify.notify_one();
 
-        Ok(route_id)
+        Ok(route_id.into())
     }
 }

@@ -13,11 +13,11 @@ use crate::services::{ConnService, GatewayService};
 use crate::trace::TraceExecutor;
 
 pub struct Server {
-    shared_data: Arc<ArcSwap<SharedData>>,
+    shared_data: SharedData,
 }
 
 impl Server {
-    pub fn new(shared_data: Arc<ArcSwap<SharedData>>) -> Self {
+    pub fn new(shared_data: SharedData) -> Self {
         Server { shared_data }
     }
 

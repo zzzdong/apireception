@@ -1,4 +1,5 @@
 pub mod path_rewrite;
+pub mod script;
 pub mod traffic_split;
 
 use std::sync::Arc;
@@ -11,6 +12,8 @@ use crate::http::{HyperRequest, HyperResponse};
 
 pub use self::path_rewrite::PathRewriteConfig;
 use self::path_rewrite::PathRewritePlugin;
+pub use self::script::ScriptConfig;
+use self::script::ScriptPlugin;
 use self::traffic_split::TrafficSplitPlugin;
 pub use self::traffic_split::{TrafficSplitConfig, TrafficSplitRule};
 

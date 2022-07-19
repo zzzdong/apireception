@@ -17,7 +17,11 @@ pub struct GatewayClient {
 
 impl GatewayClient {
     pub fn new(strategy: Arc<Box<dyn LoadBalanceStrategy>>) -> Self {
-        let https = hyper_rustls::HttpsConnector::with_native_roots();
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_native_roots()
+            .https_or_http()
+            .enable_http1()
+            .build();
 
         let inner: Client<_, hyper::Body> = Client::builder().build(https);
 

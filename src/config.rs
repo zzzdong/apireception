@@ -1,6 +1,7 @@
 use std::{
     cmp::Reverse,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    iter::FromIterator,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
@@ -12,10 +13,10 @@ use drain::Watch;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Notify;
-use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DNSName};
+use tokio_rustls::{rustls::sign::CertifiedKey, webpki::DnsName};
 
-use crate::error::{unsupport_file, ConfigError};
-use crate::upstream::Upstream;
+use crate::error::{unsupport_file, upstream_not_found, ConfigError};
+use crate::upstream::{Upstream, UpstreamMap};
 use crate::{
     health::HealthConfig,
     router::{PathRouter, Route},
@@ -102,6 +103,40 @@ pub struct Endpoint {
 }
 
 impl Config {
+    pub fn build_router(&self) -> Result<PathRouter, ConfigError> {
+        let mut router = PathRouter::new();
+
+        let upstream_set: HashSet<&str> =
+            HashSet::from_iter(self.upstreams.iter().map(|up| up.id.as_str()));
+
+        for r in &self.routes {
+            upstream_set
+                .get(r.upstream_id.as_str())
+                .ok_or(upstream_not_found(&r.upstream_id))?;
+
+            let route = Route::new(r)?;
+
+            for uri in &r.uris {
+                let endpoint = router.at_or_default(uri);
+                endpoint.push(route.clone());
+                endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
+            }
+        }
+
+        Ok(router)
+    }
+
+    pub fn build_upstream_map(&self) -> Result<UpstreamMap, ConfigError> {
+        let mut upstreams: UpstreamMap = HashMap::new();
+
+        for u in &self.upstreams {
+            let upstream = Upstream::new(u)?;
+            upstreams.insert(u.name.clone(), Arc::new(RwLock::new(upstream)));
+        }
+
+        Ok(upstreams)
+    }
+
     // pub async fn load_db(&mut self, db: Database) -> Result<(), ConfigError> {
     //     // load routes
     //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
@@ -189,8 +224,8 @@ pub struct RuntimeConfig {
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
     pub adminapi_addr: Option<SocketAddr>,
-    pub certificates: Arc<HashMap<DNSName, CertifiedKey>>,
-    pub shared_data: Arc<ArcSwap<SharedData>>,
+    pub certificates: Arc<HashMap<DnsName, CertifiedKey>>,
+    pub shared_data: SharedData,
     pub config: Arc<RwLock<Config>>,
     pub config_notify: Arc<Notify>,
     pub watch: Watch,
@@ -206,7 +241,7 @@ impl RuntimeConfig {
             None
         };
         let certificates = Arc::new(HashMap::new());
-        let shared_data = Arc::new(ArcSwap::from_pointee(SharedData::new(&cfg)?));
+        let shared_data = SharedData::new(&cfg)?;
         let config = Arc::new(RwLock::new(cfg));
         let config_notify = Arc::new(Notify::new());
 
@@ -236,59 +271,55 @@ impl RuntimeConfig {
         });
     }
 
-    pub fn apply_config(config: Arc<RwLock<Config>>, shared_data: Arc<ArcSwap<SharedData>>) {
+    pub fn apply_config(config: Arc<RwLock<Config>>, shared_data: SharedData) {
         let cfg = config.read().unwrap();
-        match SharedData::new(&cfg) {
-            Ok(new_shared) => {
-                shared_data.store(Arc::new(new_shared));
+        match shared_data.reload(&cfg) {
+            Ok(_) => {
+                let mut path = std::env::temp_dir();
+                let filename = format!(
+                    "apireception-config-{:?}.yaml",
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs()
+                );
+
+                path.push(filename);
+
+                cfg.dump_file(path).unwrap();
             }
             Err(err) => {
                 tracing::error!(%err, "apply config failed")
             }
         }
-
-        let mut path = std::env::temp_dir();
-        let filename = format!(
-            "apireception-config-{:?}.yaml",
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-        );
-
-        path.push(filename);
-
-        cfg.dump_file(path).unwrap();
     }
 }
 
+#[derive(Clone)]
 pub struct SharedData {
-    pub router: PathRouter,
-    pub upstreams: HashMap<String, Arc<RwLock<Upstream>>>,
+    pub router: Arc<ArcSwap<PathRouter>>,
+    pub upstreams: Arc<ArcSwap<UpstreamMap>>,
 }
 
 impl SharedData {
     pub fn new(cfg: &Config) -> Result<Self, ConfigError> {
-        let mut upstreams: HashMap<String, Arc<RwLock<Upstream>>> = HashMap::new();
+        let router = cfg.build_router()?;
+        let upstreams = cfg.build_upstream_map()?;
 
-        for u in &cfg.upstreams {
-            let upstream = Upstream::new(u)?;
-            upstreams.insert(u.name.clone(), Arc::new(RwLock::new(upstream)));
-        }
+        Ok(SharedData {
+            router: Arc::new(ArcSwap::new(Arc::new(router))),
+            upstreams: Arc::new(ArcSwap::new(Arc::new(upstreams))),
+        })
+    }
 
-        let mut router = PathRouter::new();
+    pub fn reload(&self, cfg: &Config) -> Result<(), ConfigError> {
+        let router = cfg.build_router()?;
+        let upstreams = cfg.build_upstream_map()?;
 
-        for r in &cfg.routes {
-            let route = Route::new(r, upstreams.clone())?;
+        self.router.store(Arc::new(router));
+        self.upstreams.store(Arc::new(upstreams));
 
-            for uri in &r.uris {
-                let endpoint = router.at_or_default(uri);
-                endpoint.push(route.clone());
-                endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
-            }
-        }
-
-        Ok(SharedData { router, upstreams })
+        Ok(())
     }
 }
 
