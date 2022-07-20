@@ -41,8 +41,8 @@ async fn run() -> Result<()> {
 
     tracing::debug!(?cfg, "load config done");
 
-    let (tx, watch) = drain::channel();
-    let rtcfg = RuntimeConfig::new(cfg, watch).await?;
+    let (drain_tx, drain_rx) = drain::channel();
+    let rtcfg = RuntimeConfig::new(cfg, drain_rx).await?;
 
     rtcfg.start_watch_config();
 
@@ -63,10 +63,13 @@ async fn run() -> Result<()> {
         }
     });
 
-    if rtcfg.config.read().unwrap().admin.enable {
+    let rtcfg_cloned = rtcfg.clone();
+
+    if rtcfg_cloned.config.read().unwrap().admin.enable {
+        let adminapi_addr = rtcfg_cloned.adminapi_addr.unwrap();
         tokio::spawn(async move {
-            let adminapi = AdminApi::new(rtcfg);
-            match adminapi.run().await {
+            let adminapi = AdminApi::new(rtcfg_cloned);
+            match adminapi.run(adminapi_addr).await {
                 Ok(_) => {
                     tracing::info!("adminapi server done");
                 }
@@ -79,11 +82,12 @@ async fn run() -> Result<()> {
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
-            println!("got ctrl_c, shutting down...")
+            println!("got ctrl_c, shutting down...");
+            let _shutdown = rtcfg.watch.ignore_signaled();
         }
     }
 
-    tx.drain().await;
+    drain_tx.drain().await;
 
     Ok(())
 }

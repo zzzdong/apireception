@@ -3,10 +3,9 @@ mod session;
 mod status;
 mod upstream;
 
-use std::sync::{Arc, RwLock};
+use std::{sync::{Arc, RwLock}, net::SocketAddr};
 
-use hyper::StatusCode;
-use lieweb::{response::IntoResponse, Error, LieResponse, Request, Response};
+use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -19,8 +18,21 @@ use self::{
     upstream::UpstreamApi,
 };
 
+type ApiCtx = AppState<AppContext>;
+
+type ApiParam = PathParam<Param>;
+
+type ApiResult<T> = Result<ApiResponse<T>, Status>;
+
+#[derive(Clone)]
+pub struct AppContext {
+    config: Arc<RwLock<Config>>,
+    config_notify: Arc<Notify>,
+    shared_data: SharedData,
+}
+
 #[derive(Debug, Deserialize)]
-pub struct IdParam {
+pub struct Param {
     pub id: String,
 }
 
@@ -28,9 +40,7 @@ pub struct IdParam {
 pub struct ApiResponse<T: Serialize> {
     pub err_code: i32,
     pub err_msg: String,
-    pub data: T,
-    #[serde(skip)]
-    pub status: Option<StatusCode>,
+    pub data: Option<T>,
 }
 
 impl<T> ApiResponse<T>
@@ -41,8 +51,7 @@ where
         ApiResponse {
             err_code: 0,
             err_msg: String::from("ok"),
-            data,
-            status: None,
+            data: Some(data),
         }
     }
 }
@@ -52,37 +61,7 @@ impl<T: Serialize + Default> ApiResponse<T> {
         ApiResponse {
             err_code,
             err_msg: err_msg.to_string(),
-            data: T::default(),
-            status: None,
-        }
-    }
-
-    fn with_status(mut self, status: StatusCode) -> Self {
-        self.status = Some(status);
-        self
-    }
-}
-
-impl<T: Serialize> From<ApiResponse<T>> for Response {
-    fn from(r: ApiResponse<T>) -> Self {
-        LieResponse::with_json(&r).into()
-    }
-}
-
-impl From<lieweb::Error> for ApiResponse<Option<()>> {
-    fn from(err: Error) -> Self {
-        match err {
-            Error::MissingParam { .. }
-            | Error::InvalidParam { .. }
-            | Error::MissingHeader { .. }
-            | Error::InvalidHeader { .. }
-            | Error::MissingCookie { .. } => {
-                ApiResponse::with_error(400, err).with_status(StatusCode::BAD_REQUEST)
-            }
-            Error::JsonError(_) | Error::QueryError(_) => {
-                ApiResponse::with_error(400, err).with_status(StatusCode::BAD_REQUEST)
-            }
-            _ => ApiResponse::with_error(500, err).with_status(StatusCode::INTERNAL_SERVER_ERROR),
+            data: None,
         }
     }
 }
@@ -100,15 +79,6 @@ impl<T: Serialize> From<T> for ApiResponse<T> {
     }
 }
 
-type ApiResult<T> = Result<ApiResponse<T>, Status>;
-
-#[derive(Clone)]
-pub struct AppContext {
-    config: Arc<RwLock<Config>>,
-    config_notify: Arc<Notify>,
-    shared_data: SharedData,
-}
-
 pub struct AdminApi {
     rtcfg: RuntimeConfig,
 }
@@ -118,12 +88,12 @@ impl AdminApi {
         AdminApi { rtcfg }
     }
 
-    pub async fn run(self) -> Result<(), Error> {
+    pub async fn run(self, addr: SocketAddr) -> Result<(), Error> {
         let RuntimeConfig {
             config,
             shared_data,
             config_notify,
-            adminapi_addr,
+            watch,
             ..
         } = self.rtcfg;
 
@@ -135,15 +105,11 @@ impl AdminApi {
 
         let mut app = lieweb::App::with_state(app_ctx);
 
-        app.middleware(AuthMiddleware::new("/login"));
+        app.middleware(AuthMiddleware::new("/api/session/login"));
 
-        app.post("/api/session/login", |req: Request| async move {
-            SessionApi::login(req).await
-        });
+        app.post("/api/session/login", SessionApi::login);
 
-        app.post("/api/session/logout", |req: Request| async move {
-            SessionApi::logout(req).await
-        });
+        app.post("/api/session/logout", SessionApi::logout);
 
         app.get("/api/routes", RouteApi::get_list);
 
@@ -161,6 +127,17 @@ impl AdminApi {
 
         app.put("/api/upstreams/:id", UpstreamApi::update);
 
-        app.run(adminapi_addr.unwrap()).await
+        tracing::info!("adminapi run on {:?}", addr);
+
+        tokio::select! {
+            _ = app.run(addr) => {
+
+            }
+            _shutdown = watch.signaled() => {
+
+            }
+        };
+
+        Ok(())
     }
 }

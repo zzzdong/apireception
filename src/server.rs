@@ -37,6 +37,8 @@ impl Server {
         loop {
             tokio::select! {
                 ret = listener.accept() => {
+                    tracing::debug!("accepting {:?}", ret);
+
                     match ret {
                         Ok((stream, remote_addr)) => {
                             let mut conn_svc = conn_svc.clone();
@@ -54,7 +56,7 @@ impl Server {
                     }
                 }
                 _shutdown = watch.clone().signaled() => {
-                    tracing::info!("stoping accept");
+                    tracing::info!("stopping accept");
                     break;
                 }
             }

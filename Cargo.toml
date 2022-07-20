@@ -29,9 +29,11 @@ rand = "0.8"
 thiserror = "1"
 hyper-rustls ="0.23"
 hyper-timeout = "0.4"
-lieweb = { git="https://github.com/zzzdong/lieweb.git" }
+lieweb = "0.2.0-beta.1"
 lazy_static = "1.4"
 rune = "0.12"
 
 [patch.crates-io]
+lieweb = {git="https://github.com/zzzdong/lieweb.git"}
 route-recognizer = {git="https://github.com/zzzdong/route-recognizer.git", branch="add-at_or_default"}
+

@@ -276,13 +276,10 @@ impl RuntimeConfig {
         match shared_data.reload(&cfg) {
             Ok(_) => {
                 let mut path = std::env::temp_dir();
-                let filename = format!(
-                    "apireception-config-{:?}.yaml",
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                );
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap();
+                let filename = format!("apireception-config-{:?}.yaml", now.as_secs_f32());
 
                 path.push(filename);
 

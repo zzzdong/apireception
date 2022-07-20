@@ -4,7 +4,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use arc_swap::ArcSwap;
 use hyper::{client::HttpConnector, Client, Method, Request, Uri};
 use hyper_rustls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;

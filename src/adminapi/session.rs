@@ -1,8 +1,3 @@
-use hyper::StatusCode;
-use lieweb::{LieRequest, LieResponse};
-use rand::Rng;
-use serde::{Deserialize, Serialize};
-
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -10,9 +5,13 @@ use std::{
     time::Duration,
 };
 
+use hyper::StatusCode;
 use lieweb::{middleware::Middleware, Cookie, Request, Response};
+use lieweb::{Json, LieRequest, LieResponse};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 
-use crate::adminapi::ApiResponse;
+use super::status::Status;
 
 const ALLOWED_ADMIN: (&str, &str) = ("admin", "admin");
 const SESSION_COOKIE_NAME: &str = "sid";
@@ -84,8 +83,8 @@ impl Middleware for AuthMiddleware {
 pub struct SessionApi;
 
 impl SessionApi {
-    pub async fn login(mut req: Request) -> Result<Response, lieweb::Error> {
-        let login_req: LoginReq = req.read_json().await?;
+    pub async fn login(req: Json<LoginReq>) -> Result<LieResponse, Status> {
+        let login_req: LoginReq = req.take();
 
         if login_req.username == ALLOWED_ADMIN.0 && login_req.password == ALLOWED_ADMIN.1 {
             let login_name = login_req.username;
@@ -103,18 +102,18 @@ impl SessionApi {
                 .unwrap()
                 .store(&sid, login_name.to_string());
 
-            let cookie = Cookie::new(SESSION_COOKIE_NAME, sid);
+            let mut cookie = Cookie::new(SESSION_COOKIE_NAME, sid);
+            cookie.set_path("/");
 
             let data = LoginResp { login_name };
-            let resp = LieResponse::with_json(&data).append_cookie(cookie).into();
 
-            return Ok(resp);
+            return Ok(LieResponse::with_json(data).append_cookie(cookie));
         }
 
-        Ok(LieResponse::with_status(StatusCode::UNAUTHORIZED).into())
+        Err(Status::unauthorized("invalid user or password"))
     }
 
-    pub async fn logout(req: Request) -> Result<Response, lieweb::Error> {
+    pub async fn logout(req: Request) -> Result<LieResponse, Status> {
         if let Ok(ref cookie) = req.get_cookie(SESSION_COOKIE_NAME) {
             G_SESSION_STORE.clone().write().unwrap().delete(cookie);
         }
@@ -125,17 +124,17 @@ impl SessionApi {
 
         let resp = LieResponse::with_status(StatusCode::OK).append_cookie(cookie);
 
-        Ok(resp.into())
+        Ok(resp)
     }
 }
 
 #[derive(Debug, Deserialize)]
-struct LoginReq {
+pub struct LoginReq {
     pub username: String,
     pub password: String,
 }
 
 #[derive(Debug, Serialize)]
-struct LoginResp {
+pub struct LoginResp {
     pub login_name: String,
 }
