@@ -1,8 +1,7 @@
-use std::{convert::TryFrom, sync::Arc};
+use std::sync::Arc;
 
 use headers::{HeaderName, HeaderValue};
-use hyper::{http::uri::PathAndQuery, Uri};
-use regex::Regex;
+use hyper::Body;
 use rune::{runtime::RuntimeContext, ContextError, FromValue, Module, Unit, Vm};
 use serde::{Deserialize, Serialize};
 
@@ -31,7 +30,7 @@ impl ScriptPlugin {
         let runtime = Arc::new(context.runtime());
 
         let mut sources = rune::Sources::new();
-        sources.insert(rune::Source::new("ScriptPlugin", &cfg.script));
+        sources.insert(rune::Source::new("entry", &cfg.script));
 
         let mut diagnostics = rune::Diagnostics::new();
 
@@ -39,7 +38,12 @@ impl ScriptPlugin {
             .with_context(&context)
             .with_diagnostics(&mut diagnostics)
             .build()
-            .map_err(|e| ConfigError::Message(format!("script compile err: {:?}", e)))?;
+            .map_err(|e| {
+                ConfigError::Message(format!(
+                    "script compile err: {:?}",
+                    diagnostics.diagnostics()
+                ))
+            })?;
 
         Ok(ScriptPlugin {
             unit: Arc::new(unit),
@@ -64,11 +68,11 @@ impl Plugin for ScriptPlugin {
             .call(&["on_access"], (MyRequest { inner: req },))
             .unwrap();
 
-        let AccessResult { req, resp } = AccessResult::from_value(output).unwrap();
+        type MyResult = Result<MyRequest, MyResponse>;
 
-        let MyRequest { inner } = req;
+        let ret = MyResult::from_value(output).unwrap();
 
-        Ok(inner)
+        ret.map(|r| r.inner).map_err(|r| r.inner)
     }
 
     fn after_forward(
@@ -84,7 +88,9 @@ fn build_module() -> Result<Module, ContextError> {
     let mut module = Module::new();
 
     module.ty::<MyRequest>()?;
-    module.ty::<AccessResult>()?;
+    module.ty::<MyResponse>()?;
+
+    module.function(&["MyResponse", "new"], MyResponse::new)?;
 
     Ok(module)
 }
@@ -111,7 +117,16 @@ impl MyRequest {
 }
 
 #[derive(Debug, rune::Any)]
-struct AccessResult {
-    req: MyRequest,
-    resp: Option<MyRequest>,
+struct MyResponse {
+    inner: crate::http::HyperResponse,
+}
+
+impl MyResponse {
+    fn new() -> Self {
+        MyResponse {
+            inner: hyper::Response::builder()
+                .body(Body::from("I am in scripting"))
+                .unwrap(),
+        }
+    }
 }

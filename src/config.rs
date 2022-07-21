@@ -112,7 +112,7 @@ impl Config {
         for r in &self.routes {
             upstream_set
                 .get(r.upstream_id.as_str())
-                .ok_or(upstream_not_found(&r.upstream_id))?;
+                .ok_or_else(|| upstream_not_found(&r.upstream_id))?;
 
             let route = Route::new(r)?;
 

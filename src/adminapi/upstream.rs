@@ -18,7 +18,7 @@ impl UpstreamApi {
             .iter()
             .find(|up| &up.id == upstream_id)
             .cloned()
-            .ok_or(Status::not_found("Upstream not exist"))?;
+            .ok_or_else(|| Status::not_found("Upstream not exist"))?;
 
         Ok(upstream.into())
     }
@@ -38,8 +38,6 @@ impl UpstreamApi {
             return Err(Status::bad_request("Upstream Id exist"));
         }
 
-        let upstream_id = upstream.id.clone();
-
         config.upstreams.push(upstream.clone());
 
         app_ctx.config_notify.notify_one();
@@ -53,9 +51,9 @@ impl UpstreamApi {
         upstream: Result<Json<UpstreamConfig>, JsonRejection>,
     ) -> ApiResult<UpstreamConfig> {
         let mut upstream = upstream.map(|v| v.take()).map_err(Status::bad_request)?;
-        let upstream_id = &param.value().id;
+        let upstream_id = param.take().id;
 
-        upstream.id = upstream_id.clone();
+        upstream.id = upstream_id;
 
         let mut config = app_ctx.config.write().unwrap();
 

@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::{net::SocketAddr, pin::Pin};
 
 use futures::Future;
@@ -43,7 +44,7 @@ pub fn append_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
     let x_forwarded_for = match x_forwarded_for {
         Some(exist_forwarded_for) => {
             let mut forwarded_for = exist_forwarded_for.to_str().unwrap_or("").to_string();
-            forwarded_for.push_str(&format!(", {}", info.addr.to_string()));
+            write!(forwarded_for, ", {}", info.addr).unwrap();
             forwarded_for
         }
         None => info.addr.to_string(),

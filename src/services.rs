@@ -8,7 +8,11 @@ use std::{
 
 use futures::Future;
 use headers::HeaderValue;
-use hyper::{header::HOST, http::{uri::Authority, Extensions}, Uri};
+use hyper::{
+    header::HOST,
+    http::{uri::Authority, Extensions},
+    Uri,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, error};
@@ -47,8 +51,8 @@ impl GatewayService {
 
                 routes.first().cloned()
             }
-            Err(err) => {
-                error!(%err, "find route failed");
+            Err(_err) => {
+                debug!("route not found");
                 None
             }
         }

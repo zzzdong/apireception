@@ -3,7 +3,10 @@ mod session;
 mod status;
 mod upstream;
 
-use std::{sync::{Arc, RwLock}, net::SocketAddr};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, RwLock},
+};
 
 use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Request, Response};
 use serde::{Deserialize, Serialize};

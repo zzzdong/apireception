@@ -54,6 +54,7 @@ pub fn init_plugin(
     let plugin: Box<dyn Plugin + Send + Sync> = match name {
         "path_rewrite" => Box::new(PathRewritePlugin::new(parse_config(cfg)?)?),
         "traffic_split" => Box::new(TrafficSplitPlugin::new(parse_config(cfg)?)?),
+        "script" => Box::new(ScriptPlugin::new(parse_config(cfg)?)?),
         _ => {
             return Err(ConfigError::Message("Unkown plugin".to_string()));
         }

@@ -18,7 +18,7 @@ impl RouteApi {
             .iter()
             .find(|r| &r.id == route_id)
             .cloned()
-            .ok_or(Status::not_found("Route not exist"))?;
+            .ok_or_else(|| Status::not_found("Route not exist"))?;
 
         Ok(route.into())
     }
@@ -53,7 +53,7 @@ impl RouteApi {
         let mut route = route.take();
         let route_id = param.take().id;
 
-        route.id = route_id.clone();
+        route.id = route_id;
 
         let mut config = app_ctx.config.write().unwrap();
 
