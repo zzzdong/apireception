@@ -73,7 +73,7 @@ impl Upstream {
             .collect::<Vec<_>>()
     }
 
-    pub fn select_upstream(&self, ctx: &GatewayContext) -> Option<String> {
+    pub fn select_endpoint(&self, ctx: &GatewayContext) -> Option<String> {
         let mut available_endpoints = self.healthy_endpoints();
         if available_endpoints.is_empty() {
             available_endpoints = self.all_endpoints();
@@ -84,7 +84,7 @@ impl Upstream {
             upstream_addrs: &available_endpoints,
         };
 
-        let endpoint = self.client.strategy.select_upstream(&context).to_string();
+        let endpoint = self.client.strategy.select_endpoint(&context).to_string();
 
         Some(endpoint)
     }
@@ -96,7 +96,7 @@ pub struct Context<'a> {
 }
 
 pub trait LoadBalanceStrategy: Send + Sync + std::fmt::Debug {
-    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str;
+    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str;
     fn on_send_request(&self, uri: &Uri) {
         let _ = uri;
     }
@@ -115,7 +115,7 @@ impl Random {
 }
 
 impl LoadBalanceStrategy for Random {
-    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str {
+    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
         let index = thread_rng().gen_range(0..context.upstream_addrs.len());
 
         &context.upstream_addrs[index].addr
@@ -132,7 +132,7 @@ impl WeightedRandom {
 }
 
 impl LoadBalanceStrategy for WeightedRandom {
-    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str {
+    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
         let total_weigth = context
             .upstream_addrs
             .iter()
@@ -166,7 +166,7 @@ impl LeastRequest {
 }
 
 impl LoadBalanceStrategy for LeastRequest {
-    fn select_upstream<'a>(&self, context: &'a Context) -> &'a str {
+    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
         let connections = self.connections.read().unwrap();
 
         let address_indices: Vec<usize> =
@@ -256,7 +256,7 @@ mod test {
 
         let mut result: HashMap<&str, u32> = HashMap::new();
         for _ in 0..100000 {
-            let got = weighted.select_upstream(&ctx);
+            let got = weighted.select_endpoint(&ctx);
 
             result.entry(got).and_modify(|sum| *sum += 1).or_default();
         }
@@ -267,7 +267,7 @@ mod test {
 
         let mut result: HashMap<&str, u32> = HashMap::new();
         for _ in 0..1000 {
-            let got = random.select_upstream(&ctx);
+            let got = random.select_endpoint(&ctx);
 
             result.entry(got).and_modify(|sum| *sum += 1).or_default();
         }

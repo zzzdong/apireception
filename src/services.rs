@@ -6,10 +6,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use arc_swap::{ArcSwap, Cache};
 use futures::Future;
 use headers::HeaderValue;
-use hyper::{header::HOST, http::uri::Authority, Uri};
+use hyper::{header::HOST, http::{uri::Authority, Extensions}, Uri};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, error};
@@ -72,6 +71,7 @@ impl GatewayService {
         let mut ctx = GatewayContext {
             remote_addr,
             upstream_id: route.upstream_id.clone(),
+            extensions: Extensions::new(),
         };
 
         for plugin in &route.plugins {
@@ -92,7 +92,7 @@ impl GatewayService {
                 let upstream = upstream.read().unwrap();
                 parts.scheme = Some(upstream.scheme.clone());
 
-                let authority = upstream.select_upstream(&ctx);
+                let authority = upstream.select_endpoint(&ctx);
                 let authority =
                     authority.and_then(|authority| Authority::try_from(authority.as_str()).ok());
                 parts.authority = authority;

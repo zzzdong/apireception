@@ -1,7 +1,5 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 
-use arc_swap::ArcSwap;
 use drain::Watch;
 use hyper::server::conn::Http;
 use tokio::net::TcpListener;
