@@ -46,10 +46,10 @@ impl TrafficSplitPlugin {
         Ok(TrafficSplitPlugin { rules })
     }
 
-    fn select_upstream(&self, req: &HyperRequest) -> Option<&str> {
+    fn select_upstream(&self, req: &HyperRequest) -> Option<String> {
         for rule in &self.rules {
             if rule.matcher.matchs(req) {
-                return Some(rule.upstream_id.as_str());
+                return Some(rule.upstream_id.clone());
             }
         }
         None
@@ -67,12 +67,10 @@ impl Plugin for TrafficSplitPlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayContext,
+        ctx: &mut crate::context::GatewayInfo,
         req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
-        if let Some(upstream_id) = self.select_upstream(&req) {
-            ctx.upstream_id = upstream_id.to_string();
-        }
+        ctx.upstream_id = self.select_upstream(&req);
 
         Ok(req)
     }

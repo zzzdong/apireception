@@ -25,9 +25,9 @@ use crate::{
     upstream::Upstream,
 };
 use crate::{
-    context::GatewayContext,
+    context::GatewayInfo,
     http::{
-        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, RemoteInfo,
+        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, RequestInfo,
         ResponseFuture,
     },
 };
@@ -63,16 +63,24 @@ impl GatewayService {
         upstreams: &HashMap<String, Arc<RwLock<Upstream>>>,
         mut req: HyperRequest,
     ) -> HyperResponse {
-        let mut info = req
-            .extensions_mut()
-            .remove::<RemoteInfo>()
-            .expect("RemoteInfo must exist");
+        let req_scheme = req.uri().scheme().cloned();
+        let req_host = req.uri().host().map(|h| h.to_string());
 
-        info.setup(&req);
+        {
+            let info = req
+                .extensions_mut()
+                .get_mut::<RequestInfo>()
+                .expect("RemoteInfo must exist");
+
+            info.host = req_host;
+            info.scheme = req_scheme;
+        }
 
         let remote_addr = info.addr;
+        let upstream_id = route.upstream_id.clone();
 
-        let mut ctx = GatewayContext {
+
+        let mut ctx = GatewayInfo {
             remote_addr,
             upstream_id: route.upstream_id.clone(),
             extensions: Extensions::new(),
@@ -89,31 +97,27 @@ impl GatewayService {
             }
         }
 
-        let mut client = match upstreams.get(&ctx.upstream_id) {
+
+        let upstream_id = ctx.upstream_id.unwrap_or(route.upstream_id);
+
+
+
+        let (mut client, endpoints) = match upstreams.get(&ctx.upstream_id) {
             Some(upstream) => {
-                let mut parts = req.uri().clone().into_parts();
-
                 let upstream = upstream.read().unwrap();
-                parts.scheme = Some(upstream.scheme.clone());
+                let endpoints = upstream.healthy_endpoints();
 
-                let authority = upstream.select_endpoint(&ctx);
-                let authority =
-                    authority.and_then(|authority| Authority::try_from(authority.as_str()).ok());
-                parts.authority = authority;
+                let mut parts = req.uri().clone().into_parts();
+                parts.scheme = Some(upstream.scheme.clone());
 
                 *req.uri_mut() = Uri::from_parts(parts).expect("build uri failed");
 
-                upstream.client.clone()
+                (upstream.client.clone(), endpoints)
             }
             None => {
                 return upstream_unavailable();
             }
         };
-
-        // check request
-        if req.uri().authority().is_none() {
-            return upstream_unavailable();
-        }
 
         append_proxy_headers(&mut req, &info);
 
@@ -210,7 +214,7 @@ where
         } = self.clone();
 
         let addr = io.peer_addr().expect("can not get peer addr");
-        let info = RemoteInfo::new(addr);
+        let info = RequestInfo::new(addr);
         let svc = AppendInfoService::new(inner, info);
 
         Box::pin(async move {

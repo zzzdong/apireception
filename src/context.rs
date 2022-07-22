@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use hyper::http::Extensions;
 
-pub struct GatewayContext {
-    pub remote_addr: SocketAddr,
-    pub upstream_id: String,
+pub struct GatewayInfo {
+    pub request_info: SocketAddr,
+    pub upstream_id: Option<String>,
     pub extensions: Extensions,
 }

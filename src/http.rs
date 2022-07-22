@@ -1,4 +1,5 @@
 use std::fmt::Write;
+use std::time::SystemTime;
 use std::{net::SocketAddr, pin::Pin};
 
 use futures::Future;
@@ -17,18 +18,20 @@ pub type ResponseFuture =
     Pin<Box<dyn Future<Output = Result<HyperResponse, crate::Error>> + Send + 'static>>;
 
 #[derive(Debug, Clone)]
-pub struct RemoteInfo {
+pub struct RequestInfo {
     pub addr: SocketAddr,
+    pub start_time: SystemTime,
     pub scheme: Option<Scheme>,
     pub host: Option<String>,
 }
 
-impl RemoteInfo {
+impl RequestInfo {
     pub fn new(addr: SocketAddr) -> Self {
-        RemoteInfo {
+        RequestInfo {
             addr,
             scheme: None,
             host: None,
+            start_time: SystemTime::now(),
         }
     }
 
@@ -38,7 +41,7 @@ impl RemoteInfo {
     }
 }
 
-pub fn append_proxy_headers(req: &mut HyperRequest, info: &RemoteInfo) {
+pub fn append_proxy_headers(req: &mut HyperRequest, info: &RequestInfo) {
     let x_forwarded_for = req.headers().get(X_FORWARDED_FOR);
 
     let x_forwarded_for = match x_forwarded_for {

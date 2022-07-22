@@ -6,7 +6,7 @@ use tower::Service;
 
 use crate::{
     http::{HyperRequest, HyperResponse, ResponseFuture},
-    upstream::LoadBalanceStrategy,
+    load_balance::{LoadBalanceStrategy, Context},
 };
 
 #[derive(Clone)]
@@ -21,6 +21,7 @@ impl GatewayClient {
             .with_native_roots()
             .https_or_http()
             .enable_http1()
+            .enable_http2()
             .build();
 
         let inner: Client<_, hyper::Body> = Client::builder().build(https);
@@ -48,6 +49,36 @@ impl Service<HyperRequest> for GatewayClient {
         } = self.clone();
 
         Box::pin(async move {
+            let ctx = Context {
+                remote_addr: &"127.0.0.1:80".parse::<SocketAddr>().unwrap(),
+                upstream_addrs: &endpoints[..],
+                req: &req,
+            };
+            
+            // select endpoint
+
+            
+            
+            // check request
+            if req.uri().authority().is_none() {
+                return upstream_unavailable();
+            }
+
+
+            
+
+
+
+            let mut parts = req.uri().clone().into_parts();
+            parts.scheme = Some(upstream.scheme.clone());
+
+            let authority = strategy.select_endpoint(&ctx);
+            let authority =
+                authority.and_then(|authority| Authority::try_from(authority.as_str()).ok());
+            parts.authority = authority;
+
+            *req.uri_mut() = Uri::from_parts(parts).expect("build uri failed");
+
             let endpoint = req.uri().clone();
             strategy.on_send_request(&endpoint);
             let resp = inner.call(req).await;

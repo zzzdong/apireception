@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use headers::{HeaderName, HeaderValue};
 use hyper::Body;
-use rune::{runtime::RuntimeContext, ContextError, FromValue, Module, Unit, Vm};
+use rune::{
+    runtime::{Object, RuntimeContext},
+    ContextError, FromValue, Module, Unit, Value, Vm,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ConfigError;
@@ -59,7 +62,7 @@ impl Plugin for ScriptPlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayContext,
+        ctx: &mut crate::context::GatewayInfo,
         req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
         let mut vm = Vm::new(self.runtime.clone(), self.unit.clone());
@@ -77,7 +80,7 @@ impl Plugin for ScriptPlugin {
 
     fn after_forward(
         &self,
-        ctx: &mut crate::context::GatewayContext,
+        ctx: &mut crate::context::GatewayInfo,
         resp: crate::http::HyperResponse,
     ) -> crate::http::HyperResponse {
         resp
@@ -122,11 +125,22 @@ struct MyResponse {
 }
 
 impl MyResponse {
-    fn new() -> Self {
+    fn new(status: u16, value: Value) -> Self {
+        let mut res = hyper::Response::builder().status(status);
+        {
+            let headers = res.headers_mut().unwrap();
+            headers.insert(
+                hyper::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json;utf-8"),
+            );
+        }
+
+        let data = serde_json::to_vec(&value).unwrap();
+
+        let res = res.body(Body::from(data));
+
         MyResponse {
-            inner: hyper::Response::builder()
-                .body(Body::from("I am in scripting"))
-                .unwrap(),
+            inner: res.unwrap(),
         }
     }
 }

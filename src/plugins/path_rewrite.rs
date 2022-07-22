@@ -63,7 +63,7 @@ impl Plugin for PathRewritePlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayContext,
+        ctx: &mut crate::context::GatewayInfo,
         mut req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
         let _ = ctx;

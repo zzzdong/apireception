@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
-use crate::context::GatewayContext;
+use crate::context::GatewayInfo;
 use crate::error::ConfigError;
 use crate::http::{HyperRequest, HyperResponse};
 
@@ -29,7 +29,7 @@ pub trait Plugin {
     /// when a request arrived, check or rewrite request.
     fn on_access(
         &self,
-        ctx: &mut GatewayContext,
+        ctx: &mut GatewayInfo,
         req: HyperRequest,
     ) -> Result<HyperRequest, HyperResponse> {
         let _ = ctx;
@@ -37,7 +37,7 @@ pub trait Plugin {
     }
 
     /// after forward request, check or rewrite response.
-    fn after_forward(&self, ctx: &mut GatewayContext, resp: HyperResponse) -> HyperResponse {
+    fn after_forward(&self, ctx: &mut GatewayInfo, resp: HyperResponse) -> HyperResponse {
         let _ = ctx;
         resp
     }

@@ -1,10 +1,11 @@
 mod adminapi;
+mod load_balance;
 mod config;
 mod context;
 mod error;
+mod gateway_client;
 mod health;
 mod http;
-mod http_client;
 mod matcher;
 mod peer_addr;
 mod plugins;
