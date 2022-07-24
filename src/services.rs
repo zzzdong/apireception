@@ -10,7 +10,7 @@ use futures::Future;
 use headers::HeaderValue;
 use hyper::{
     header::HOST,
-    http::{uri::Authority, Extensions},
+    http::{uri::{Authority, Scheme}, Extensions},
     Uri,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -19,15 +19,15 @@ use tracing::{debug, error};
 
 use crate::{
     config::SharedData,
-    http::{append_proxy_headers, bad_gateway},
+    http::{bad_gateway},
     peer_addr::PeerAddr,
     router::{PathRouter, Route},
     upstream::Upstream,
 };
 use crate::{
-    context::GatewayInfo,
+    context::{GatewayInfo, RequestInfo},
     http::{
-        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, RequestInfo,
+        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse,
         ResponseFuture,
     },
 };
@@ -63,26 +63,20 @@ impl GatewayService {
         upstreams: &HashMap<String, Arc<RwLock<Upstream>>>,
         mut req: HyperRequest,
     ) -> HyperResponse {
-        let req_scheme = req.uri().scheme().cloned();
-        let req_host = req.uri().host().map(|h| h.to_string());
-
-        {
+        let request_info = {
             let info = req
                 .extensions_mut()
-                .get_mut::<RequestInfo>()
+                .get::<RequestInfo>()
                 .expect("RemoteInfo must exist");
 
-            info.host = req_host;
-            info.scheme = req_scheme;
-        }
+            info.clone()
+        };
 
-        let remote_addr = info.addr;
         let upstream_id = route.upstream_id.clone();
 
-
         let mut ctx = GatewayInfo {
-            remote_addr,
-            upstream_id: route.upstream_id.clone(),
+            request_info,
+            upstream_id: None,
             extensions: Extensions::new(),
         };
 
@@ -97,35 +91,21 @@ impl GatewayService {
             }
         }
 
+        let upstream_id = ctx.upstream_id.clone().unwrap_or(route.upstream_id.clone());
 
-        let upstream_id = ctx.upstream_id.unwrap_or(route.upstream_id);
-
-
-
-        let (mut client, endpoints) = match upstreams.get(&ctx.upstream_id) {
+        let (mut client) = match upstreams.get(&upstream_id) {
             Some(upstream) => {
                 let upstream = upstream.read().unwrap();
-                let endpoints = upstream.healthy_endpoints();
+                let healthy_endpoints = upstream.healthy_endpoints();
 
-                let mut parts = req.uri().clone().into_parts();
-                parts.scheme = Some(upstream.scheme.clone());
-
-                *req.uri_mut() = Uri::from_parts(parts).expect("build uri failed");
-
-                (upstream.client.clone(), endpoints)
+                (upstream.client.clone())
             }
             None => {
                 return upstream_unavailable();
             }
         };
 
-        append_proxy_headers(&mut req, &info);
-
-        // set host, use upstream host
-        let host = req.uri().host().expect("get host failed");
-        let host = HeaderValue::from_str(host).expect("HeaderValue failed");
-        req.headers_mut().insert(HOST, host);
-
+        // do forward
         let mut resp = match Service::call(&mut client, req).await {
             Ok(resp) => resp,
             Err(err) => {
@@ -174,14 +154,16 @@ impl Service<HyperRequest> for GatewayService {
 #[derive(Clone, Debug)]
 pub struct ConnService<S> {
     inner: S,
+    scheme: Scheme,
     server: HttpServer,
     drain: drain::Watch,
 }
 
 impl<S> ConnService<S> {
-    pub fn new(svc: S, server: HttpServer, drain: drain::Watch) -> Self {
+    pub fn new(svc: S, scheme: Scheme, server: HttpServer, drain: drain::Watch) -> Self {
         ConnService {
             inner: svc,
+            scheme,
             server,
             drain,
         }
@@ -209,12 +191,13 @@ where
     fn call(&mut self, io: I) -> Self::Future {
         let Self {
             server,
+            scheme,
             inner,
             drain,
         } = self.clone();
 
-        let addr = io.peer_addr().expect("can not get peer addr");
-        let info = RequestInfo::new(addr);
+        let remote_addr = io.peer_addr().expect("can not get peer addr");
+        let info = RequestInfo::new(scheme, remote_addr);
         let svc = AppendInfoService::new(inner, info);
 
         Box::pin(async move {
@@ -233,6 +216,10 @@ where
             Ok(())
         })
     }
+}
+
+pub trait AppendInfo {
+    fn append_info(&mut self, req: HyperRequest);
 }
 
 #[derive(Clone, Debug)]
@@ -255,7 +242,7 @@ where
         + Send
         + 'static,
     S::Future: Send + 'static,
-    T: Clone + Send + Sync + 'static,
+    T: AppendInfo + Clone + Send + Sync + 'static,
 {
     type Response = HyperResponse;
     type Error = crate::Error;

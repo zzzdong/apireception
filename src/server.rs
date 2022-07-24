@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use drain::Watch;
+use hyper::http::uri::Scheme;
 use hyper::server::conn::Http;
 use tokio::net::TcpListener;
 use tower::Service;
@@ -11,16 +12,17 @@ use crate::services::{ConnService, GatewayService};
 use crate::trace::TraceExecutor;
 
 pub struct Server {
+    scheme: Scheme,
     shared_data: SharedData,
 }
 
 impl Server {
-    pub fn new(shared_data: SharedData) -> Self {
-        Server { shared_data }
+    pub fn new(scheme: Scheme, shared_data: SharedData) -> Self {
+        Server { scheme, shared_data }
     }
 
     pub async fn run(self, addr: SocketAddr, watch: Watch) -> crate::Result<()> {
-        let Server { shared_data } = self;
+        let Server { scheme, shared_data } = self;
 
         let http_svc = GatewayService::new(shared_data);
 
@@ -30,7 +32,7 @@ impl Server {
 
         tracing::info!("server listen on {:?}", addr);
 
-        let conn_svc = ConnService::new(http_svc, http, watch.clone());
+        let conn_svc = ConnService::new(http_svc, scheme, http, watch.clone());
 
         loop {
             tokio::select! {

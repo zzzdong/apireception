@@ -19,6 +19,7 @@ use std::process::exit;
 
 pub use error::{Error, Result};
 
+use hyper::http::uri::Scheme;
 use server::Server;
 
 use crate::{adminapi::AdminApi, config::RuntimeConfig};
@@ -49,8 +50,9 @@ async fn run() -> Result<()> {
 
     let rtcfg_cloned = rtcfg.clone();
 
+    // Serve HTTP
     tokio::spawn(async move {
-        let srv = Server::new(rtcfg_cloned.shared_data);
+        let srv = Server::new(Scheme::HTTP, rtcfg_cloned.shared_data);
         let ret = srv.run(rtcfg_cloned.http_addr, rtcfg_cloned.watch).await;
 
         match ret {
@@ -63,6 +65,9 @@ async fn run() -> Result<()> {
             }
         }
     });
+
+    // TODO: add serve https
+
 
     let rtcfg_cloned = rtcfg.clone();
 

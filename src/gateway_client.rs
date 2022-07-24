@@ -65,7 +65,12 @@ impl Service<HyperRequest> for GatewayClient {
             }
 
 
-            
+            append_proxy_headers(&mut req, &ctx.request_info);
+
+            // set host, use upstream host
+            let host = req.uri().host().expect("get host failed");
+            let host = HeaderValue::from_str(host).expect("HeaderValue failed");
+            req.headers_mut().insert(HOST, host);
 
 
 
