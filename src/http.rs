@@ -1,13 +1,7 @@
-use std::fmt::Write;
-use std::time::SystemTime;
-use std::{net::SocketAddr, pin::Pin};
+use std::pin::Pin;
 
 use futures::Future;
-use headers::HeaderValue;
-use hyper::{http::uri::Scheme, StatusCode};
-
-use crate::config::Endpoint;
-use crate::gateway_client::GatewayClient;
+use hyper::StatusCode;
 
 pub const X_FORWARDED_FOR: &str = "x-forwarded-for";
 pub const X_FORWARDED_HOST: &str = "x-forwarded-host";
@@ -19,13 +13,6 @@ pub type HyperResponse = hyper::Response<hyper::Body>;
 pub type HttpServer = hyper::server::conn::Http<crate::trace::TraceExecutor>;
 pub type ResponseFuture =
     Pin<Box<dyn Future<Output = Result<HyperResponse, crate::Error>> + Send + 'static>>;
-
-
-pub struct UpstreamInfo {
-    pub sheme: Scheme,
-    pub endpoints: Vec<Endpoint>,
-    pub client: GatewayClient,
-}
 
 pub fn not_found() -> HyperResponse {
     hyper::Response::builder()

@@ -69,6 +69,8 @@ pub struct RouteConfig {
     pub uris: Vec<String>,
     pub upstream_id: String,
     #[serde(default)]
+    pub overwrite_host: bool,
+    #[serde(default)]
     pub matcher: String,
     #[serde(default)]
     pub priority: u32,

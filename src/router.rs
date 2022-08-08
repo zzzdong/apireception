@@ -12,6 +12,7 @@ pub type PathRouter = route_recognizer::Router<Vec<Route>>;
 pub struct Route {
     pub matcher: RouteMatcher,
     pub upstream_id: String,
+    pub overwrite_host: bool,
     pub priority: u32,
     pub plugins: Vec<Arc<Box<dyn Plugin + Send + Sync>>>,
 }
@@ -32,6 +33,7 @@ impl Route {
 
         Ok(Route {
             matcher,
+            overwrite_host: cfg.overwrite_host,
             upstream_id: cfg.upstream_id.to_string(),
             priority: cfg.priority,
             plugins,

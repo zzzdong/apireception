@@ -1,17 +1,16 @@
-use std::{net::SocketAddr, time::SystemTime};
 use std::fmt::Write;
+use std::{net::SocketAddr, time::SystemTime};
 
 use headers::HeaderValue;
-use hyper::http::{Extensions, uri::Scheme};
+use hyper::http::{uri::Scheme, Extensions};
 
-use crate::{services::AppendInfo, http::*};
+use crate::{http::*, services::AppendInfo};
 
 pub struct GatewayInfo {
     pub request_info: RequestInfo,
     pub upstream_id: Option<String>,
     pub extensions: Extensions,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct RequestInfo {
@@ -31,9 +30,9 @@ impl RequestInfo {
         }
     }
 
-    pub fn append_proxy_headers(&self, req: &mut HyperRequest, ) {
+    pub fn append_proxy_headers(&self, req: &mut HyperRequest) {
         let x_forwarded_for = req.headers().get(X_FORWARDED_FOR);
-    
+
         let x_forwarded_for = match x_forwarded_for {
             Some(exist_forwarded_for) => {
                 let mut forwarded_for = exist_forwarded_for.to_str().unwrap_or("").to_string();
@@ -47,17 +46,17 @@ impl RequestInfo {
             X_FORWARDED_FOR,
             HeaderValue::from_str(&x_forwarded_for).expect("HeaderValue failed"),
         );
-    
+
         req.headers_mut().insert(
             X_REAL_IP,
             HeaderValue::from_str(&self.remote_addr.ip().to_string()).expect("HeaderValue failed"),
         );
-    
+
         req.headers_mut().insert(
             X_FORWARDED_PROTO,
             HeaderValue::from_str(self.scheme.as_str()).expect("HeaderValue failed"),
         );
-    
+
         if let Some(ref host) = self.host {
             req.headers_mut().insert(
                 X_FORWARDED_HOST,
@@ -65,7 +64,6 @@ impl RequestInfo {
             );
         }
     }
-    
 }
 
 impl AppendInfo for RequestInfo {
@@ -73,4 +71,3 @@ impl AppendInfo for RequestInfo {
         self.host = req.uri().host().map(|h| h.to_string());
     }
 }
-

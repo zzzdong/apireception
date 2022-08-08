@@ -1,24 +1,20 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
-use hyper::http::uri::{Scheme, Uri};
-use rand::{thread_rng, Rng};
-
+use hyper::http::uri::Scheme;
 
 use crate::config::{Endpoint, UpstreamConfig};
-use crate::context::GatewayInfo;
 use crate::error::ConfigError;
+use crate::forwarder::HttpClient;
 use crate::health::{HealthConfig, Healthiness};
-use crate::gateway_client::GatewayClient;
-use crate::load_balance::{LoadBalanceStrategy, Random, WeightedRandom, LeastRequest, Context};
+use crate::load_balance::*;
 
 pub type UpstreamMap = HashMap<String, Arc<RwLock<Upstream>>>;
 
 pub struct Upstream {
     pub name: String,
     pub scheme: Scheme,
-    pub client: GatewayClient,
+    pub client: HttpClient,
     pub endpoints: Vec<(Endpoint, Arc<RwLock<Healthiness>>)>,
     pub health_config: HealthConfig,
 }
@@ -46,7 +42,7 @@ impl Upstream {
             }
         };
 
-        let client = GatewayClient::new(strategy);
+        let client = HttpClient::new(strategy);
 
         Ok(Upstream {
             name: cfg.name.clone(),
@@ -91,4 +87,3 @@ impl Upstream {
     //     Some(endpoint)
     // }
 }
-

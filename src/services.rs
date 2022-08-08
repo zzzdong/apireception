@@ -10,7 +10,10 @@ use futures::Future;
 use headers::HeaderValue;
 use hyper::{
     header::HOST,
-    http::{uri::{Authority, Scheme}, Extensions},
+    http::{
+        uri::{Authority, Scheme},
+        Extensions,
+    },
     Uri,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -19,7 +22,8 @@ use tracing::{debug, error};
 
 use crate::{
     config::SharedData,
-    http::{bad_gateway},
+    forwarder::{ForwardInfo, Fowarder},
+    http::bad_gateway,
     peer_addr::PeerAddr,
     router::{PathRouter, Route},
     upstream::Upstream,
@@ -27,8 +31,7 @@ use crate::{
 use crate::{
     context::{GatewayInfo, RequestInfo},
     http::{
-        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse,
-        ResponseFuture,
+        not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, ResponseFuture,
     },
 };
 
@@ -72,6 +75,7 @@ impl GatewayService {
             info.clone()
         };
 
+        let overwrite_host = route.overwrite_host;
         let upstream_id = route.upstream_id.clone();
 
         let mut ctx = GatewayInfo {
@@ -93,12 +97,18 @@ impl GatewayService {
 
         let upstream_id = ctx.upstream_id.clone().unwrap_or(route.upstream_id.clone());
 
-        let (mut client) = match upstreams.get(&upstream_id) {
+        let mut forwarder = match upstreams.get(&upstream_id) {
             Some(upstream) => {
                 let upstream = upstream.read().unwrap();
                 let healthy_endpoints = upstream.healthy_endpoints();
 
-                (upstream.client.clone())
+                let forward_info = ForwardInfo {
+                    overwrite_host,
+                    upstream_scheme: upstream.scheme.clone(),
+                    upstream_endpoints: healthy_endpoints,
+                };
+
+                Fowarder::new(upstream.client.clone(), forward_info)
             }
             None => {
                 return upstream_unavailable();
@@ -106,7 +116,7 @@ impl GatewayService {
         };
 
         // do forward
-        let mut resp = match Service::call(&mut client, req).await {
+        let mut resp = match Service::call(&mut forwarder, req).await {
             Ok(resp) => resp,
             Err(err) => {
                 error!(?err, "forward request failed");

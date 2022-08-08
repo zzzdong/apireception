@@ -1,11 +1,11 @@
 mod adminapi;
-mod load_balance;
 mod config;
 mod context;
 mod error;
-mod gateway_client;
+mod forwarder;
 mod health;
 mod http;
+mod load_balance;
 mod matcher;
 mod peer_addr;
 mod plugins;
@@ -67,7 +67,6 @@ async fn run() -> Result<()> {
     });
 
     // TODO: add serve https
-
 
     let rtcfg_cloned = rtcfg.clone();
 

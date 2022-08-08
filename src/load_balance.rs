@@ -1,6 +1,5 @@
 use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
 
-use hyper::Uri;
 use rand::{thread_rng, Rng};
 
 use crate::{config::Endpoint, http::HyperRequest};
@@ -8,16 +7,15 @@ use crate::{config::Endpoint, http::HyperRequest};
 pub struct Context<'a> {
     pub remote_addr: &'a SocketAddr,
     pub upstream_addrs: &'a [Endpoint],
-    pub req: &'a HyperRequest,
 }
 
 pub trait LoadBalanceStrategy: Send + Sync + std::fmt::Debug {
     fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str;
-    fn on_send_request(&self, uri: &Uri) {
-        let _ = uri;
+    fn on_send_request(&self, endpoint: &str) {
+        let _ = endpoint;
     }
-    fn on_request_done(&self, uri: &Uri) {
-        let _ = uri;
+    fn on_request_done(&self, endpoint: &str) {
+        let _ = endpoint;
     }
 }
 
@@ -125,18 +123,14 @@ impl LoadBalanceStrategy for LeastRequest {
         }
     }
 
-    fn on_send_request(&self, endpoint: &Uri) {
+    fn on_send_request(&self, endpoint: &str) {
         let mut connections = self.connections.write().unwrap();
-        *connections
-            .entry(endpoint.authority().unwrap().to_string())
-            .or_insert(0) += 1;
+        *connections.entry(endpoint.to_string()).or_insert(0) += 1;
     }
 
-    fn on_request_done(&self, endpoint: &Uri) {
+    fn on_request_done(&self, endpoint: &str) {
         let mut connections = self.connections.write().unwrap();
-        *connections
-            .entry(endpoint.authority().unwrap().to_string())
-            .or_insert(0) -= 1;
+        *connections.entry(endpoint.to_string()).or_insert(0) -= 1;
     }
 }
 
@@ -169,7 +163,6 @@ mod test {
         let ctx = Context {
             remote_addr: &"127.0.0.1:80".parse::<SocketAddr>().unwrap(),
             upstream_addrs: &endpoints[..],
-            req: &req,
         };
 
         let weighted = WeightedRandom::new();

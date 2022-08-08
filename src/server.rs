@@ -18,11 +18,17 @@ pub struct Server {
 
 impl Server {
     pub fn new(scheme: Scheme, shared_data: SharedData) -> Self {
-        Server { scheme, shared_data }
+        Server {
+            scheme,
+            shared_data,
+        }
     }
 
     pub async fn run(self, addr: SocketAddr, watch: Watch) -> crate::Result<()> {
-        let Server { scheme, shared_data } = self;
+        let Server {
+            scheme,
+            shared_data,
+        } = self;
 
         let http_svc = GatewayService::new(shared_data);
 
