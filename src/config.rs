@@ -28,9 +28,13 @@ pub struct Config {
     #[serde(default)]
     pub admin: AdminConfig,
     #[serde(default)]
-    pub routes: Vec<RouteConfig>,
-    #[serde(default)]
-    pub upstreams: Vec<UpstreamConfig>,
+    pub registry_provider: RegistryProvider,
+}
+
+impl Config {
+    pub fn load_file(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
+        load_file(path)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -59,6 +63,58 @@ pub struct TlsConfig {
     pub cert_path: PathBuf,
     pub key_path: PathBuf,
 }
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct Registry {
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
+    #[serde(default)]
+    pub upstreams: Vec<UpstreamConfig>,
+}
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum RegistryProvider {
+    #[serde(rename="etcd")]
+    Etcd(EtcdProvider),
+    #[serde(rename="file")]
+    File(FileProvider),
+}
+
+impl RegistryProvider {
+    fn load_registry(&self) -> Result<Registry, ConfigError> {
+        // TODO
+        match self {
+            RegistryProvider::Etcd(cfg) => {
+                unimplemented!()
+            }
+            RegistryProvider::File(cfg) => {
+                Registry::load_file(&cfg.path)
+            }
+        }
+    }
+}
+
+impl Default for RegistryProvider {
+    fn default() -> Self {
+        RegistryProvider::File(FileProvider{
+            path: PathBuf::from("config/apireception.yaml"),
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct EtcdProvider {
+    pub host: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct FileProvider {
+    pub path: PathBuf,
+}
+
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RouteConfig {
@@ -104,7 +160,7 @@ pub struct Endpoint {
     pub weight: u32,
 }
 
-impl Config {
+impl Registry {
     pub fn build_router(&self) -> Result<PathRouter, ConfigError> {
         let mut router = PathRouter::new();
 
@@ -177,7 +233,7 @@ impl Config {
     //     Ok(())
     // }
 
-    pub fn load_file(path: impl AsRef<Path>) -> Result<Config, ConfigError> {
+    pub fn load_file(path: impl AsRef<Path>) -> Result<Registry, ConfigError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -228,9 +284,12 @@ pub struct RuntimeConfig {
     pub adminapi_addr: Option<SocketAddr>,
     pub certificates: Arc<HashMap<DnsName, CertifiedKey>>,
     pub shared_data: SharedData,
-    pub config: Arc<RwLock<Config>>,
+
     pub config_notify: Arc<Notify>,
     pub watch: Watch,
+
+    pub config: Arc<Config>,
+    pub registry: Arc<RwLock<Registry>>,
 }
 
 impl RuntimeConfig {
@@ -242,10 +301,15 @@ impl RuntimeConfig {
         } else {
             None
         };
+
+        // load registry
+        let registry = cfg.registry_provider.load_registry()?;
+
         let certificates = Arc::new(HashMap::new());
-        let shared_data = SharedData::new(&cfg)?;
-        let config = Arc::new(RwLock::new(cfg));
+        let shared_data = SharedData::new(&registry)?;
+        let config = Arc::new(cfg);
         let config_notify = Arc::new(Notify::new());
+        let registry = Arc::new(RwLock::new(registry));
 
         Ok(RuntimeConfig {
             http_addr,
@@ -254,13 +318,14 @@ impl RuntimeConfig {
             shared_data,
             certificates,
             config,
+            registry,
             config_notify,
             watch,
         })
     }
 
     pub fn start_watch_config(&self) {
-        let config = self.config.clone();
+        let registry = self.registry.clone();
         let notify = self.config_notify.clone();
         let shared_data = self.shared_data.clone();
 
@@ -268,14 +333,14 @@ impl RuntimeConfig {
             loop {
                 notify.notified().await;
 
-                Self::apply_config(config.clone(), shared_data.clone());
+                Self::apply_config(registry.clone(), shared_data.clone());
             }
         });
     }
 
-    pub fn apply_config(config: Arc<RwLock<Config>>, shared_data: SharedData) {
-        let cfg = config.read().unwrap();
-        match shared_data.reload(&cfg) {
+    pub fn apply_config(registry: Arc<RwLock<Registry>>, shared_data: SharedData) {
+        let registry = registry.read().unwrap();
+        match shared_data.reload(&registry) {
             Ok(_) => {
                 let mut path = std::env::temp_dir();
                 let now = SystemTime::now()
@@ -285,7 +350,7 @@ impl RuntimeConfig {
 
                 path.push(filename);
 
-                cfg.dump_file(path).unwrap();
+                registry.dump_file(path).unwrap();
             }
             Err(err) => {
                 tracing::error!(%err, "apply config failed")
@@ -301,9 +366,9 @@ pub struct SharedData {
 }
 
 impl SharedData {
-    pub fn new(cfg: &Config) -> Result<Self, ConfigError> {
-        let router = cfg.build_router()?;
-        let upstreams = cfg.build_upstream_map()?;
+    pub fn new(registry: &Registry) -> Result<Self, ConfigError> {
+        let router = registry.build_router()?;
+        let upstreams = registry.build_upstream_map()?;
 
         Ok(SharedData {
             router: Arc::new(ArcSwap::new(Arc::new(router))),
@@ -311,15 +376,59 @@ impl SharedData {
         })
     }
 
-    pub fn reload(&self, cfg: &Config) -> Result<(), ConfigError> {
-        let router = cfg.build_router()?;
-        let upstreams = cfg.build_upstream_map()?;
+    pub fn reload(&self, registry: &Registry) -> Result<(), ConfigError> {
+        let router = registry.build_router()?;
+        let upstreams = registry.build_upstream_map()?;
 
         self.router.store(Arc::new(router));
         self.upstreams.store(Arc::new(upstreams));
 
         Ok(())
     }
+}
+
+
+pub fn load_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, ConfigError> {
+    let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|p| p.to_str())
+        .ok_or_else(unsupport_file)?;
+
+    let content = std::fs::read_to_string(path)?;
+
+    tracing::info!(?content, "file ok");
+
+    let cfg = match ext {
+        "yaml" => serde_yaml::from_str(&content)?,
+        "json" => serde_json::from_str(&content)?,
+        "toml" => toml::from_str(&content)?,
+        _ => {
+            return Err(unsupport_file().into());
+        }
+    };
+
+    Ok(cfg)
+}
+
+pub fn dump_file<T: serde::Serialize>(data: &T, path: impl AsRef<Path>) -> Result<(), ConfigError> {
+    let path = path.as_ref();
+    let ext = path
+        .extension()
+        .and_then(|p| p.to_str())
+        .ok_or_else(unsupport_file)?;
+
+    let contents = match ext {
+        "yaml" => serde_yaml::to_string(data)?,
+        "json" => serde_json::to_string_pretty(data)?,
+        "toml" => toml::to_string_pretty(data)?,
+        _ => {
+            return Err(unsupport_file().into());
+        }
+    };
+
+    std::fs::write(path, contents)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -428,6 +537,12 @@ mod test {
                     password: "admin".to_string(),
                 }],
             },
+            registry_provider: RegistryProvider::default(),
+        };
+
+        dump_file(&cfg, "config/config.yaml").unwrap();
+
+        let registry = Registry {
             routes: vec![
                 RouteConfig {
                     id: "hello".to_string(),
@@ -478,7 +593,7 @@ mod test {
             ],
         };
 
-        cfg.dump_file("config.yaml").unwrap();
+        dump_file(&registry, "config/apireception.yaml").unwrap();
     }
 
     // #[tokio::test]

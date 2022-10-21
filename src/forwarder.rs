@@ -8,7 +8,6 @@ use hyper::{
     Body, Client, Uri,
 };
 use hyper_rustls::HttpsConnector;
-use rune::ast::Continue;
 use tower::Service;
 
 use crate::{
@@ -43,6 +42,7 @@ impl HttpClient {
 
     pub async fn do_forward<'a>(
         &mut self,
+        context: &'a Context<'a>,
         mut req: HyperRequest,
         endpoint: &'a str,
     ) -> Result<HyperResponse, hyper::Error> {
@@ -128,7 +128,7 @@ impl Service<HyperRequest> for Fowarder {
 
             let endpoint = client.strategy.select_endpoint(&ctx);
 
-            let resp = client.do_forward(req, endpoint).await;
+            let resp = client.do_forward(&ctx, req, endpoint).await;
 
             resp.map_err(Into::into)
         })

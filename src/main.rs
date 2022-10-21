@@ -39,7 +39,7 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
-    let cfg = config::Config::load_file("config.yaml")?;
+    let cfg = config::Config::load_file("config/config.yaml")?;
 
     tracing::debug!(?cfg, "load config done");
 
@@ -67,11 +67,10 @@ async fn run() -> Result<()> {
     });
 
     // TODO: add serve https
-
     let rtcfg_cloned = rtcfg.clone();
 
-    if rtcfg_cloned.config.read().unwrap().admin.enable {
-        let adminapi_addr = rtcfg_cloned.adminapi_addr.unwrap();
+    if rtcfg_cloned.config.admin.enable {
+        let adminapi_addr = rtcfg.adminapi_addr.unwrap();
         tokio::spawn(async move {
             let adminapi = AdminApi::new(rtcfg_cloned);
             match adminapi.run(adminapi_addr).await {

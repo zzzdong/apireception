@@ -12,7 +12,7 @@ use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Re
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::config::{Config, RuntimeConfig, SharedData};
+use crate::config::{Registry, RuntimeConfig, SharedData};
 
 use self::{
     route::RouteApi,
@@ -29,8 +29,8 @@ type ApiResult<T> = Result<ApiResponse<T>, Status>;
 
 #[derive(Clone)]
 pub struct AppContext {
-    config: Arc<RwLock<Config>>,
-    config_notify: Arc<Notify>,
+    registry: Arc<RwLock<Registry>>,
+    registry_notify: Arc<Notify>,
     shared_data: SharedData,
 }
 
@@ -93,7 +93,7 @@ impl AdminApi {
 
     pub async fn run(self, addr: SocketAddr) -> Result<(), Error> {
         let RuntimeConfig {
-            config,
+            registry: config,
             shared_data,
             config_notify,
             watch,
@@ -101,8 +101,8 @@ impl AdminApi {
         } = self.rtcfg;
 
         let app_ctx = AppContext {
-            config,
-            config_notify,
+            registry: config,
+            registry_notify: config_notify,
             shared_data,
         };
 

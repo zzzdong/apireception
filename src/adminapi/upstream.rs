@@ -11,7 +11,7 @@ impl UpstreamApi {
     pub async fn get_detail(app_ctx: ApiCtx, param: ApiParam) -> ApiResult<UpstreamConfig> {
         let upstream_id = &param.value().id;
 
-        let config = app_ctx.config.read().unwrap();
+        let config = app_ctx.registry.read().unwrap();
 
         let upstream = config
             .upstreams
@@ -24,7 +24,7 @@ impl UpstreamApi {
     }
 
     pub async fn get_list(app_ctx: ApiCtx) -> ApiResult<Vec<UpstreamConfig>> {
-        let config = app_ctx.config.read().unwrap();
+        let config = app_ctx.registry.read().unwrap();
 
         Ok(config.upstreams.clone().into())
     }
@@ -32,7 +32,7 @@ impl UpstreamApi {
     pub async fn add(app_ctx: ApiCtx, upstream: UpstreamCfg) -> ApiResult<UpstreamConfig> {
         let upstream = upstream.take();
 
-        let mut config = app_ctx.config.write().unwrap();
+        let mut config = app_ctx.registry.write().unwrap();
 
         if config.upstreams.iter().any(|up| up.id == upstream.id) {
             return Err(Status::bad_request("Upstream Id exist"));
@@ -40,7 +40,7 @@ impl UpstreamApi {
 
         config.upstreams.push(upstream.clone());
 
-        app_ctx.config_notify.notify_one();
+        app_ctx.registry_notify.notify_one();
 
         Ok(upstream.into())
     }
@@ -55,7 +55,7 @@ impl UpstreamApi {
 
         upstream.id = upstream_id;
 
-        let mut config = app_ctx.config.write().unwrap();
+        let mut config = app_ctx.registry.write().unwrap();
 
         match config.upstreams.iter_mut().find(|up| up.id == upstream.id) {
             Some(up) => {
@@ -66,7 +66,7 @@ impl UpstreamApi {
             }
         }
 
-        app_ctx.config_notify.notify_one();
+        app_ctx.registry_notify.notify_one();
 
         Ok(upstream.into())
     }
