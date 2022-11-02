@@ -1,4 +1,4 @@
-use std::convert::TryFrom;
+use std::{borrow::Cow, convert::TryFrom};
 
 use hyper::{http::uri::PathAndQuery, Uri};
 use regex::Regex;
@@ -43,11 +43,11 @@ impl PathRewritePlugin {
         Ok(path_rewrite)
     }
 
-    pub fn path_rewrite(&self, path: &str) -> String {
+    pub fn path_rewrite<'a>(&self, path: &'a str) -> Cow<'a, str> {
         match self {
-            PathRewritePlugin::Keep => path.to_string(),
-            PathRewritePlugin::Static(ref s) => s.to_string(),
-            PathRewritePlugin::RegexReplace(ref re, ref rep) => re.replace(path, rep).to_string(),
+            PathRewritePlugin::Keep => Cow::Borrowed(path),
+            PathRewritePlugin::Static(ref s) => Cow::Owned(s.to_owned()),
+            PathRewritePlugin::RegexReplace(ref re, ref pat) => re.replace(path, pat),
         }
     }
 }
@@ -63,13 +63,13 @@ impl Plugin for PathRewritePlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayInfo,
+        ctx: &mut crate::context::GatewayContext,
         mut req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
         let _ = ctx;
         let orig_uri = req.uri().clone();
 
-        let path = self.path_rewrite(orig_uri.path());
+        let path = self.path_rewrite(orig_uri.path()).to_string();
 
         if path != orig_uri.path() {
             let mut parts = orig_uri.into_parts();

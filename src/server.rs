@@ -7,8 +7,8 @@ use tokio::net::TcpListener;
 use tower::Service;
 use tracing::Instrument;
 
-use crate::config::SharedData;
-use crate::services::{ConnService, GatewayService};
+use crate::runtime::SharedData;
+use crate::services::ConnService;
 use crate::trace::TraceExecutor;
 
 pub struct Server {
@@ -30,15 +30,13 @@ impl Server {
             shared_data,
         } = self;
 
-        let http_svc = GatewayService::new(shared_data);
-
         let http = Http::new().with_executor(TraceExecutor::new());
 
         let listener = TcpListener::bind(addr).await?;
 
         tracing::info!("server listen on {:?}", addr);
 
-        let conn_svc = ConnService::new(http_svc, scheme, http, watch.clone());
+        let conn_svc = ConnService::new(shared_data, scheme, http, watch.clone());
 
         loop {
             tokio::select! {

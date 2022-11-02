@@ -1,20 +1,16 @@
-use std::{collections::HashMap, net::SocketAddr, sync::RwLock};
+use std::{collections::HashMap, sync::RwLock};
 
+use hyper::Uri;
 use rand::{thread_rng, Rng};
 
-use crate::{config::Endpoint, http::HyperRequest};
-
-pub struct Context<'a> {
-    pub remote_addr: &'a SocketAddr,
-    pub upstream_addrs: &'a [Endpoint],
-}
+use crate::{context::GatewayContext, http::HyperRequest};
 
 pub trait LoadBalanceStrategy: Send + Sync + std::fmt::Debug {
-    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str;
-    fn on_send_request(&self, endpoint: &str) {
+    fn select_endpoint<'a>(&self, ctx: &'a GatewayContext, req: &HyperRequest) -> &'a Uri;
+    fn on_send_request(&self, ctx: &GatewayContext, endpoint: &Uri) {
         let _ = endpoint;
     }
-    fn on_request_done(&self, endpoint: &str) {
+    fn on_request_done(&self, ctx: &GatewayContext, endpoint: &Uri) {
         let _ = endpoint;
     }
 }
@@ -29,10 +25,10 @@ impl Random {
 }
 
 impl LoadBalanceStrategy for Random {
-    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
-        let index = thread_rng().gen_range(0..context.upstream_addrs.len());
+    fn select_endpoint<'a>(&self, ctx: &'a GatewayContext, req: &HyperRequest) -> &'a Uri {
+        let index = thread_rng().gen_range(0..ctx.available_endpoints.len());
 
-        &context.upstream_addrs[index].addr
+        &ctx.available_endpoints[index].target
     }
 }
 
@@ -46,19 +42,19 @@ impl WeightedRandom {
 }
 
 impl LoadBalanceStrategy for WeightedRandom {
-    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
-        let total_weigth = context
-            .upstream_addrs
+    fn select_endpoint<'a>(&self, ctx: &'a GatewayContext, req: &HyperRequest) -> &'a Uri {
+        let total_weigth = ctx
+            .available_endpoints
             .iter()
             .fold(0, |sum, a| sum + a.weight);
 
         let random = thread_rng().gen_range(0..total_weigth);
 
         let mut curr = 0;
-        for ep in context.upstream_addrs {
+        for ep in &ctx.available_endpoints {
             curr += ep.weight;
             if random < curr {
-                return &ep.addr;
+                return &ep.target;
             }
         }
 
@@ -68,7 +64,7 @@ impl LoadBalanceStrategy for WeightedRandom {
 
 #[derive(Debug)]
 pub struct LeastRequest {
-    connections: RwLock<HashMap<String, usize>>,
+    connections: RwLock<HashMap<Uri, usize>>,
 }
 
 impl LeastRequest {
@@ -80,25 +76,25 @@ impl LeastRequest {
 }
 
 impl LoadBalanceStrategy for LeastRequest {
-    fn select_endpoint<'a>(&self, context: &'a Context) -> &'a str {
+    fn select_endpoint<'a>(&self, context: &'a GatewayContext, req: &HyperRequest) -> &'a Uri {
         let connections = self.connections.read().unwrap();
 
         let address_indices: Vec<usize> =
-            if connections.len() == 0 || context.upstream_addrs.len() > connections.len() {
+            if connections.len() == 0 || context.available_endpoints.len() > connections.len() {
                 // if some upstream servers are not used yet, we'll use them for the next request
                 context
-                    .upstream_addrs
+                    .available_endpoints
                     .iter()
                     .enumerate()
-                    .filter(|(_, endpoint)| !connections.contains_key(&endpoint.addr))
+                    .filter(|(_, endpoint)| !connections.contains_key(&endpoint.target))
                     .map(|(index, _)| index)
                     .collect()
             } else {
                 let upstream_addr_map = context
-                    .upstream_addrs
+                    .available_endpoints
                     .iter()
                     .enumerate()
-                    .map(|(index, endpoint)| (&endpoint.addr, index))
+                    .map(|(index, endpoint)| (&endpoint.target, index))
                     .collect::<HashMap<_, _>>();
                 let mut least_connections = connections.iter().collect::<Vec<_>>();
 
@@ -115,28 +111,30 @@ impl LoadBalanceStrategy for LeastRequest {
             };
 
         if address_indices.len() == 1 {
-            &context.upstream_addrs[address_indices[0]].addr
+            &context.available_endpoints[address_indices[0]].target
         } else {
             let index = thread_rng().gen_range(0..address_indices.len());
 
-            &context.upstream_addrs[address_indices[index]].addr
+            &context.available_endpoints[address_indices[index]].target
         }
     }
 
-    fn on_send_request(&self, endpoint: &str) {
+    fn on_send_request(&self, ctx: &GatewayContext, endpoint: &Uri) {
         let mut connections = self.connections.write().unwrap();
-        *connections.entry(endpoint.to_string()).or_insert(0) += 1;
+        *connections.entry(endpoint.clone()).or_insert(0) += 1;
     }
 
-    fn on_request_done(&self, endpoint: &str) {
+    fn on_request_done(&self, ctx: &GatewayContext, endpoint: &Uri) {
         let mut connections = self.connections.write().unwrap();
-        *connections.entry(endpoint.to_string()).or_insert(0) -= 1;
+        *connections.entry(endpoint.clone()).or_insert(0) -= 1;
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::config::Endpoint;
+    use hyper::http::uri::Scheme;
+
+    use crate::runtime::Endpoint;
 
     use super::*;
 
@@ -144,32 +142,28 @@ mod test {
     fn test_weighted_random() {
         let endpoints = vec![
             Endpoint {
-                addr: String::from("aaa"),
+                target: Uri::from_static("http://aaa.com/"),
                 weight: 10,
             },
             Endpoint {
-                addr: String::from("bbb"),
+                target: Uri::from_static("http://bbb.com/"),
                 weight: 10,
             },
             Endpoint {
-                addr: String::from("ccc"),
+                target: Uri::from_static("http://ccc.com/"),
                 weight: 80,
             },
         ];
 
         let req = HyperRequest::new("".into());
-        let endpoints = endpoints.iter().map(Clone::clone).collect::<Vec<_>>();
 
-        let ctx = Context {
-            remote_addr: &"127.0.0.1:80".parse::<SocketAddr>().unwrap(),
-            upstream_addrs: &endpoints[..],
-        };
+        let mut ctx = GatewayContext::new(None, Scheme::HTTP, &req);
 
         let weighted = WeightedRandom::new();
 
-        let mut result: HashMap<&str, u32> = HashMap::new();
+        let mut result: HashMap<&Uri, u32> = HashMap::new();
         for _ in 0..100000 {
-            let got = weighted.select_endpoint(&ctx);
+            let got = weighted.select_endpoint(&ctx, &req);
 
             result.entry(got).and_modify(|sum| *sum += 1).or_default();
         }
@@ -178,9 +172,9 @@ mod test {
 
         let random = Random::new();
 
-        let mut result: HashMap<&str, u32> = HashMap::new();
+        let mut result: HashMap<&Uri, u32> = HashMap::new();
         for _ in 0..1000 {
-            let got = random.select_endpoint(&ctx);
+            let got = random.select_endpoint(&ctx, &req);
 
             result.entry(got).and_modify(|sum| *sum += 1).or_default();
         }

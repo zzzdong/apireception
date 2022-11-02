@@ -62,7 +62,7 @@ impl Plugin for ScriptPlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayInfo,
+        ctx: &mut crate::context::GatewayContext,
         req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
         let mut vm = Vm::new(self.runtime.clone(), self.unit.clone());
@@ -80,7 +80,7 @@ impl Plugin for ScriptPlugin {
 
     fn after_forward(
         &self,
-        ctx: &mut crate::context::GatewayInfo,
+        ctx: &mut crate::context::GatewayContext,
         resp: crate::http::HyperResponse,
     ) -> crate::http::HyperResponse {
         resp

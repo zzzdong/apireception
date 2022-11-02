@@ -1,37 +1,40 @@
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::{Arc, RwLock};
 
 use hyper::http::uri::Scheme;
+use hyper::Uri;
 
-use crate::config::{Endpoint, UpstreamConfig};
+use crate::config::UpstreamConfig;
+
+use crate::context::GatewayContext;
 use crate::error::ConfigError;
 use crate::forwarder::HttpClient;
 use crate::health::{HealthConfig, Healthiness};
+use crate::http::HyperRequest;
 use crate::load_balance::*;
+use crate::runtime::Endpoint;
 
 pub type UpstreamMap = HashMap<String, Arc<RwLock<Upstream>>>;
 
 pub struct Upstream {
     pub name: String,
-    pub scheme: Scheme,
     pub client: HttpClient,
+    pub strategy: Arc<Box<dyn LoadBalanceStrategy>>,
     pub endpoints: Vec<(Endpoint, Arc<RwLock<Healthiness>>)>,
     pub health_config: HealthConfig,
 }
 
 impl Upstream {
     pub fn new(cfg: &UpstreamConfig) -> Result<Self, ConfigError> {
-        let endpoints = cfg
-            .endpoints
-            .iter()
-            .map(|ep| (ep.clone(), Arc::new(RwLock::new(Healthiness::Up))))
-            .collect();
-
-        let scheme = if cfg.is_https {
-            Scheme::HTTPS
-        } else {
-            Scheme::HTTP
-        };
+        let mut endpoints = Vec::new();
+        for ep in &cfg.endpoints {
+            let uri = ep.addr.parse::<Uri>()?;
+            endpoints.push((
+                Endpoint::new(uri, ep.weight.try_into().unwrap()),
+                Arc::new(RwLock::new(Healthiness::Up)),
+            ));
+        }
 
         let strategy: Arc<Box<dyn LoadBalanceStrategy>> = match cfg.strategy.as_str() {
             "random" => Arc::new(Box::new(Random::new())),
@@ -42,24 +45,24 @@ impl Upstream {
             }
         };
 
-        let client = HttpClient::new(strategy);
+        let client = HttpClient::new();
 
         Ok(Upstream {
             name: cfg.name.clone(),
             endpoints,
-            scheme,
             client,
+            strategy,
             health_config: cfg.health_check.clone(),
         })
     }
 
-    pub fn healthy_endpoints(&self) -> Vec<Endpoint> {
+    pub fn healthy_endpoints(&self) -> Vec<&Endpoint> {
         self.endpoints
             .iter()
             .filter(|(endpoint, healthiness)| {
                 (endpoint.weight != 0) && (*healthiness.read().unwrap() == Healthiness::Up)
             })
-            .map(|(endpoint, _)| endpoint.clone())
+            .map(|(endpoint, _)| endpoint)
             .collect::<Vec<_>>()
     }
 
@@ -71,18 +74,15 @@ impl Upstream {
             .collect::<Vec<_>>()
     }
 
-    // pub fn select_endpoint(&self, ctx: &GatewayContext) -> Option<String> {
+    // pub fn select_endpoint(&self, ctx: &GatewayContext, req: &HyperRequest) -> Option<String> {
     //     let mut available_endpoints = self.healthy_endpoints();
     //     if available_endpoints.is_empty() {
     //         available_endpoints = self.all_endpoints();
     //     }
 
-    //     let context = Context {
-    //         remote_addr: &ctx.remote_addr,
-    //         upstream_addrs: &available_endpoints,
-    //     };
+    //     ctx.available_endpoints = available_endpoints.into_iter().map(|item|item.clone()).collect();
 
-    //     let endpoint = self.client.strategy.select_endpoint(&context).to_string();
+    //     let endpoint = self.strategy.select_endpoint(ctx, req).to_string();
 
     //     Some(endpoint)
     // }

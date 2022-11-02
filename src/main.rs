@@ -10,6 +10,7 @@ mod matcher;
 mod peer_addr;
 mod plugins;
 mod router;
+mod runtime;
 mod server;
 mod services;
 mod trace;
@@ -22,7 +23,7 @@ pub use error::{Error, Result};
 use hyper::http::uri::Scheme;
 use server::Server;
 
-use crate::{adminapi::AdminApi, config::RuntimeConfig};
+use crate::{adminapi::AdminApi, runtime::RuntimeConfig};
 
 #[tokio::main]
 async fn main() {

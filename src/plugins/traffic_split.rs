@@ -67,7 +67,7 @@ impl Plugin for TrafficSplitPlugin {
 
     fn on_access(
         &self,
-        ctx: &mut crate::context::GatewayInfo,
+        ctx: &mut crate::context::GatewayContext,
         req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
         ctx.upstream_id = self.select_upstream(&req);

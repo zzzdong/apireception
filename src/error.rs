@@ -26,6 +26,8 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
     #[error("parse addr error")]
     AddrParse(#[from] std::net::AddrParseError),
+    #[error("parse uri error")]
+    UriParse(#[from] hyper::http::uri::InvalidUri),
     #[error("parse match error")]
     MatcherParse(#[from] MatcherParseError),
     #[error("{0}")]

@@ -1,48 +1,48 @@
 use std::{
     collections::HashMap,
     convert::TryFrom,
+    net::SocketAddr,
     pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
 };
 
 use futures::Future;
-use headers::HeaderValue;
-use hyper::{
-    header::HOST,
-    http::{
-        uri::{Authority, Scheme},
-        Extensions,
-    },
-    Uri,
-};
+use hyper::http::uri::Scheme;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower::Service;
 use tracing::{debug, error};
 
 use crate::{
-    config::SharedData,
-    forwarder::{ForwardInfo, Fowarder},
-    http::bad_gateway,
-    peer_addr::PeerAddr,
-    router::{PathRouter, Route},
-    upstream::Upstream,
-};
-use crate::{
-    context::{GatewayInfo, RequestInfo},
+    context::GatewayContext,
     http::{
         not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, ResponseFuture,
     },
+    runtime::Endpoint,
+};
+use crate::{
+    forwarder::Fowarder,
+    http::bad_gateway,
+    peer_addr::PeerAddr,
+    router::{PathRouter, Route},
+    runtime::SharedData,
+    upstream::Upstream,
 };
 
 #[derive(Clone)]
 pub struct GatewayService {
     shared_data: SharedData,
+    remote_addr: Option<SocketAddr>,
+    scheme: Scheme,
 }
 
 impl GatewayService {
-    pub fn new(shared_data: SharedData) -> Self {
-        GatewayService { shared_data }
+    pub fn new(shared_data: SharedData, remote_addr: Option<SocketAddr>, scheme: Scheme) -> Self {
+        GatewayService {
+            shared_data,
+            remote_addr,
+            scheme,
+        }
     }
 
     pub fn find_route<'a>(router: &'a PathRouter, req: &HyperRequest) -> Option<&'a Route> {
@@ -62,28 +62,16 @@ impl GatewayService {
     }
 
     pub async fn dispatch(
+        mut ctx: GatewayContext,
         route: &Route,
         upstreams: &HashMap<String, Arc<RwLock<Upstream>>>,
         mut req: HyperRequest,
     ) -> HyperResponse {
-        let request_info = {
-            let info = req
-                .extensions_mut()
-                .get::<RequestInfo>()
-                .expect("RemoteInfo must exist");
+        ctx.overwrite_host = route.overwrite_host;
+        ctx.route_id = Some(route.id.clone());
+        ctx.upstream_id = Some(route.upstream_id.clone());
 
-            info.clone()
-        };
-
-        let overwrite_host = route.overwrite_host;
-        let upstream_id = route.upstream_id.clone();
-
-        let mut ctx = GatewayInfo {
-            request_info,
-            upstream_id: None,
-            extensions: Extensions::new(),
-        };
-
+        // before forward
         for plugin in &route.plugins {
             match plugin.on_access(&mut ctx, req) {
                 Ok(r) => {
@@ -95,20 +83,28 @@ impl GatewayService {
             }
         }
 
+        // fallback to route.upstream_id
         let upstream_id = ctx.upstream_id.clone().unwrap_or(route.upstream_id.clone());
+        ctx.upstream_id = Some(upstream_id.clone());
 
         let mut forwarder = match upstreams.get(&upstream_id) {
             Some(upstream) => {
                 let upstream = upstream.read().unwrap();
                 let healthy_endpoints = upstream.healthy_endpoints();
-
-                let forward_info = ForwardInfo {
-                    overwrite_host,
-                    upstream_scheme: upstream.scheme.clone(),
-                    upstream_endpoints: healthy_endpoints,
+                let available_endpoints = if healthy_endpoints.is_empty() {
+                    upstream.all_endpoints()
+                } else {
+                    healthy_endpoints
                 };
 
-                Fowarder::new(upstream.client.clone(), forward_info)
+                let available_endpoints = available_endpoints
+                    .into_iter()
+                    .cloned()
+                    .collect::<Vec<Endpoint>>();
+
+                ctx.available_endpoints = available_endpoints;
+
+                Fowarder::new(upstream.client.clone(), upstream.strategy.clone())
             }
             None => {
                 return upstream_unavailable();
@@ -116,7 +112,7 @@ impl GatewayService {
         };
 
         // do forward
-        let mut resp = match Service::call(&mut forwarder, req).await {
+        let mut resp = match forwarder.forward(&mut ctx, req).await {
             Ok(resp) => resp,
             Err(err) => {
                 error!(?err, "forward request failed");
@@ -124,6 +120,7 @@ impl GatewayService {
             }
         };
 
+        // after forward
         for plugin in &route.plugins {
             resp = plugin.after_forward(&mut ctx, resp);
         }
@@ -142,17 +139,17 @@ impl Service<HyperRequest> for GatewayService {
     }
 
     fn call(&mut self, req: HyperRequest) -> Self::Future {
+        debug!("incoming request:{:?} from {:?}", &req, &self.remote_addr);
+
+        let ctx = GatewayContext::new(self.remote_addr, self.scheme.clone(), &req);
+
         let router = self.shared_data.router.load().clone();
         let upstreams = self.shared_data.upstreams.load().clone();
 
         Box::pin(async move {
             let found = Self::find_route(&router, &req);
             let resp = match found {
-                Some(route) => {
-                    let upstreams = &upstreams;
-                    let resp = Self::dispatch(route, upstreams, req).await;
-                    resp
-                }
+                Some(route) => Self::dispatch(ctx, route, &upstreams, req).await,
                 None => not_found(),
             };
 
@@ -161,34 +158,33 @@ impl Service<HyperRequest> for GatewayService {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ConnService<S> {
-    inner: S,
+#[derive(Clone)]
+pub struct ConnService {
     scheme: Scheme,
     server: HttpServer,
     drain: drain::Watch,
+    shared_data: SharedData,
 }
 
-impl<S> ConnService<S> {
-    pub fn new(svc: S, scheme: Scheme, server: HttpServer, drain: drain::Watch) -> Self {
+impl ConnService {
+    pub fn new(
+        shared_data: SharedData,
+        scheme: Scheme,
+        server: HttpServer,
+        drain: drain::Watch,
+    ) -> Self {
         ConnService {
-            inner: svc,
             scheme,
             server,
             drain,
+            shared_data,
         }
     }
 }
 
-impl<I, S> Service<I> for ConnService<S>
+impl<I> Service<I> for ConnService
 where
     I: AsyncRead + AsyncWrite + PeerAddr + Send + Unpin + 'static,
-    S: Service<HyperRequest, Response = HyperResponse, Error = crate::Error>
-        + Clone
-        + Unpin
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
 {
     type Response = ();
     type Error = crate::Error;
@@ -200,15 +196,15 @@ where
 
     fn call(&mut self, io: I) -> Self::Future {
         let Self {
+            shared_data,
             server,
             scheme,
-            inner,
             drain,
         } = self.clone();
 
-        let remote_addr = io.peer_addr().expect("can not get peer addr");
-        let info = RequestInfo::new(scheme, remote_addr);
-        let svc = AppendInfoService::new(inner, info);
+        let remote_addr = io.peer_addr().ok();
+
+        let svc = GatewayService::new(shared_data, remote_addr, scheme);
 
         Box::pin(async move {
             let mut conn = server.serve_connection(io, svc);
@@ -225,48 +221,5 @@ where
             }
             Ok(())
         })
-    }
-}
-
-pub trait AppendInfo {
-    fn append_info(&mut self, req: HyperRequest);
-}
-
-#[derive(Clone, Debug)]
-struct AppendInfoService<S, T> {
-    inner: S,
-    info: T,
-}
-
-impl<S, T> AppendInfoService<S, T> {
-    pub fn new(inner: S, info: T) -> Self {
-        AppendInfoService { inner, info }
-    }
-}
-
-impl<S, T> Service<HyperRequest> for AppendInfoService<S, T>
-where
-    S: Service<HyperRequest, Response = HyperResponse, Error = crate::Error>
-        + Clone
-        + Unpin
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
-    T: AppendInfo + Clone + Send + Sync + 'static,
-{
-    type Response = HyperResponse;
-    type Error = crate::Error;
-    type Future = ResponseFuture;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, mut req: HyperRequest) -> Self::Future {
-        let AppendInfoService { mut inner, info } = self.clone();
-
-        req.extensions_mut().insert(info);
-
-        Box::pin(Service::call(&mut inner, req))
     }
 }

@@ -12,7 +12,8 @@ use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Re
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::config::{Registry, RuntimeConfig, SharedData};
+use crate::config::Registry;
+use crate::runtime::{RuntimeConfig, SharedData};
 
 use self::{
     route::RouteApi,

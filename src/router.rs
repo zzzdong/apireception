@@ -10,6 +10,7 @@ pub type PathRouter = route_recognizer::Router<Vec<Route>>;
 
 #[derive(Clone)]
 pub struct Route {
+    pub id: String,
     pub matcher: RouteMatcher,
     pub upstream_id: String,
     pub overwrite_host: bool,
@@ -32,6 +33,7 @@ impl Route {
         plugins.sort_unstable_by_key(|p| Reverse(p.priority()));
 
         Ok(Route {
+            id: cfg.id.clone(),
             matcher,
             overwrite_host: cfg.overwrite_host,
             upstream_id: cfg.upstream_id.to_string(),

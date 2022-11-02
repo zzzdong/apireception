@@ -4,16 +4,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use hyper::{client::HttpConnector, Client, Method, Request, Uri};
+use hyper::{client::HttpConnector, http::uri::Scheme, Client, Method, Request, Uri};
 use hyper_rustls::HttpsConnector;
 use hyper_timeout::TimeoutConnector;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::{
-    config::{Endpoint, SharedData},
-    upstream::Upstream,
-};
+use crate::{runtime::SharedData, upstream::Upstream};
 
 type HttpClient = Client<TimeoutConnector<HttpsConnector<HttpConnector>>, hyper::Body>;
 
@@ -50,9 +47,16 @@ impl UpstreamChecker {
         let client = create_http_client(&self.upstream.health_config);
 
         for (ep, status_store) in &self.upstream.endpoints {
+            let parts = ep.target.clone().into_parts();
+
+            let path = match parts.path_and_query {
+                Some(p) => p.to_string() + self.upstream.health_config.path.as_str(),
+                None => self.upstream.health_config.path.clone(),
+            };
+
             let uri = Uri::builder()
-                .scheme(self.upstream.scheme.clone())
-                .authority(ep.addr.as_str())
+                .scheme(parts.scheme.unwrap_or(Scheme::HTTP))
+                .authority(parts.authority.expect("endpoint authority empty"))
                 .path_and_query(self.upstream.health_config.path.as_str())
                 .build()
                 .expect("build upstream uri failed");
@@ -194,9 +198,16 @@ pub async fn health_check() {}
 
 pub async fn health_check_one_upstream(upstream: &Upstream) {
     for (endpoint, healthiness) in &upstream.endpoints {
+        let parts = endpoint.target.clone().into_parts();
+
+        let path = match parts.path_and_query {
+            Some(p) => p.to_string() + upstream.health_config.path.as_str(),
+            None => upstream.health_config.path.clone(),
+        };
+
         let uri = Uri::builder()
-            .scheme(upstream.scheme.clone())
-            .authority(endpoint.addr.as_str())
+            .scheme(parts.scheme.unwrap_or(Scheme::HTTP))
+            .authority(parts.authority.expect("endpoint authority error"))
             .path_and_query(upstream.health_config.path.as_str())
             .build()
             .expect("build upstream uri failed");
