@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
+use std::sync::Arc;
 
 use drain::Watch;
 use hyper::http::uri::Scheme;
@@ -13,7 +12,7 @@ use tokio_rustls::webpki::DnsName;
 use tower::Service;
 use tracing::Instrument;
 
-use crate::config::{Config, RegistryConfig};
+use crate::config::Config;
 use crate::error::ConfigError;
 use crate::registry::Registry;
 use crate::services::ConnService;
@@ -27,11 +26,10 @@ pub struct ServerContext {
     pub certificates: Arc<HashMap<DnsName, CertifiedKey>>,
     pub registry: Registry,
 
-    pub config_notify: Arc<Notify>,
+    pub registry_notify: Arc<Notify>,
     pub watch: Watch,
 
     pub config: Arc<Config>,
-    pub registry_cfg: Arc<RwLock<RegistryConfig>>,
 }
 
 impl ServerContext {
@@ -45,13 +43,11 @@ impl ServerContext {
         };
 
         // load registry
-        let registry_config = cfg.registry_provider.load_registry()?;
+        let registry = Registry::new(&cfg.registry_provider)?;
 
         let certificates = Arc::new(HashMap::new());
-        let registry = Registry::new(&registry_config)?;
+        let registry_notify = Arc::new(Notify::new());
         let config = Arc::new(cfg);
-        let config_notify = Arc::new(Notify::new());
-        let registry_config = Arc::new(RwLock::new(registry_config));
 
         Ok(ServerContext {
             http_addr,
@@ -60,49 +56,16 @@ impl ServerContext {
             registry,
             certificates,
             config,
-            registry_cfg: registry_config,
-            config_notify,
+            registry_notify,
             watch,
         })
     }
 
-    pub fn start_watch_config(&self) {
-        let registry_cfg = self.registry_cfg.clone();
-        let notify = self.config_notify.clone();
-        let shared_data = self.registry.clone();
-
-        tokio::spawn(async move {
-            loop {
-                notify.notified().await;
-
-                Self::apply_config(registry_cfg.clone(), shared_data.clone());
-            }
-        });
-    }
-
-    pub fn apply_config(registry: Arc<RwLock<RegistryConfig>>, shared_data: Registry) {
-        let registry = registry.read().unwrap();
-        match shared_data.reload(&registry) {
-            Ok(_) => {
-                let mut path = std::env::temp_dir();
-                let now = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap();
-                let filename = format!("apireception-config-{:?}.yaml", now.as_secs_f32());
-
-                path.push(filename);
-
-                registry.dump_file(path).unwrap();
-            }
-            Err(err) => {
-                tracing::error!(%err, "apply config failed")
-            }
-        }
+    pub fn start_watch_registry(&self) {
+        self.registry
+            .start_watch_notify(self.registry_notify.clone());
     }
 }
-
-
-
 
 pub struct Server {
     scheme: Scheme,

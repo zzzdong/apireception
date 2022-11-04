@@ -9,8 +9,8 @@ mod load_balance;
 mod matcher;
 mod peer_addr;
 mod plugins;
-mod router;
 mod registry;
+mod router;
 mod server;
 mod services;
 mod trace;
@@ -47,7 +47,7 @@ async fn run() -> Result<()> {
     let (drain_tx, drain_rx) = drain::channel();
     let rtcfg = ServerContext::new(cfg, drain_rx).await?;
 
-    rtcfg.start_watch_config();
+    rtcfg.start_watch_registry();
 
     let rtcfg_cloned = rtcfg.clone();
 

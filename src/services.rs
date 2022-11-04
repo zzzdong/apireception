@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    convert::TryFrom,
     net::SocketAddr,
     pin::Pin,
     sync::{Arc, RwLock},
@@ -24,8 +23,8 @@ use crate::{
     forwarder::Fowarder,
     http::bad_gateway,
     peer_addr::PeerAddr,
-    router::{PathRouter, Route},
     registry::Registry,
+    router::{PathRouter, Route},
     upstream::Upstream,
 };
 

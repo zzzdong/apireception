@@ -1,20 +1,13 @@
 use std::{
-    cmp::Reverse,
-    collections::{HashMap, HashSet},
-    iter::FromIterator,
+    collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
 };
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::error::{unsupport_file, upstream_not_found, ConfigError};
-use crate::upstream::{Upstream, UpstreamMap};
-use crate::{
-    health::HealthConfig,
-    router::{PathRouter, Route},
-};
+use crate::error::{unsupport_file, ConfigError};
+use crate::health::HealthConfig;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
@@ -58,32 +51,12 @@ pub struct TlsConfig {
     pub key_path: PathBuf,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct RegistryConfig {
-    #[serde(default)]
-    pub routes: Vec<RouteConfig>,
-    #[serde(default)]
-    pub upstreams: Vec<UpstreamConfig>,
-}
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum RegistryProvider {
     #[serde(rename = "etcd")]
     Etcd(EtcdProvider),
     #[serde(rename = "file")]
     File(FileProvider),
-}
-
-impl RegistryProvider {
-    pub fn load_registry(&self) -> Result<RegistryConfig, ConfigError> {
-        // TODO
-        match self {
-            RegistryProvider::Etcd(cfg) => {
-                unimplemented!()
-            }
-            RegistryProvider::File(cfg) => RegistryConfig::load_file(&cfg.path),
-        }
-    }
 }
 
 impl Default for RegistryProvider {
@@ -148,89 +121,6 @@ pub struct EndpointConfig {
     pub weight: u32,
 }
 
-impl RegistryConfig {
-    // pub async fn load_db(&mut self, db: Database) -> Result<(), ConfigError> {
-    //     // load routes
-    //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
-
-    //     let cursor = routes_col.find(None, None).await?;
-
-    //     let routes: Vec<RouteConfig> = cursor.try_collect().await?;
-
-    //     self.routes = routes;
-
-    //     // load upstreams
-    //     let upstreams_col = db.collection::<UpstreamConfig>(COL_UPSTREAMS);
-
-    //     let cursor = upstreams_col.find(None, None).await?;
-
-    //     let upstreams: Vec<UpstreamConfig> = cursor.try_collect().await?;
-
-    //     self.upstreams = upstreams;
-
-    //     Ok(())
-    // }
-
-    // pub async fn dump_db(&mut self, db: Database) -> Result<(), ConfigError> {
-    //     // insert routes
-    //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
-
-    //     let _ret = routes_col.insert_many(self.routes.clone(), None).await?;
-
-    //     // insert upstreams
-    //     let upstreams_col = db.collection::<UpstreamConfig>(COL_UPSTREAMS);
-
-    //     let _ret = upstreams_col
-    //         .insert_many(self.upstreams.clone(), None)
-    //         .await?;
-
-    //     Ok(())
-    // }
-
-    pub fn load_file(path: impl AsRef<Path>) -> Result<RegistryConfig, ConfigError> {
-        let path = path.as_ref();
-        let ext = path
-            .extension()
-            .and_then(|p| p.to_str())
-            .ok_or_else(unsupport_file)?;
-
-        let content = std::fs::read_to_string(path)?;
-
-        tracing::info!(?content, "file ok");
-
-        let cfg = match ext {
-            "yaml" => serde_yaml::from_str(&content)?,
-            "json" => serde_json::from_str(&content)?,
-            "toml" => toml::from_str(&content)?,
-            _ => {
-                return Err(unsupport_file().into());
-            }
-        };
-
-        Ok(cfg)
-    }
-
-    pub fn dump_file(&self, path: impl AsRef<Path>) -> Result<(), ConfigError> {
-        let path = path.as_ref();
-        let ext = path
-            .extension()
-            .and_then(|p| p.to_str())
-            .ok_or_else(unsupport_file)?;
-
-        let contents = match ext {
-            "yaml" => serde_yaml::to_string(self)?,
-            "json" => serde_json::to_string_pretty(self)?,
-            "toml" => toml::to_string_pretty(self)?,
-            _ => {
-                return Err(unsupport_file().into());
-            }
-        };
-
-        std::fs::write(path, contents)?;
-        Ok(())
-    }
-}
-
 pub fn load_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, ConfigError> {
     let path = path.as_ref();
     let ext = path
@@ -261,6 +151,12 @@ pub fn dump_file<T: serde::Serialize>(data: &T, path: impl AsRef<Path>) -> Resul
         .and_then(|p| p.to_str())
         .ok_or_else(unsupport_file)?;
 
+    if path.is_file() {
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+    }
+
     let contents = match ext {
         "yaml" => serde_yaml::to_string(data)?,
         "json" => serde_json::to_string_pretty(data)?,
@@ -276,7 +172,10 @@ pub fn dump_file<T: serde::Serialize>(data: &T, path: impl AsRef<Path>) -> Resul
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::{PathRewriteConfig, TrafficSplitConfig, TrafficSplitRule};
+    use crate::{
+        plugins::{PathRewriteConfig, TrafficSplitConfig, TrafficSplitRule},
+        registry::RegistryConfig,
+    };
 
     use super::*;
 
