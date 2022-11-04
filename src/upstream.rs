@@ -2,18 +2,15 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{Arc, RwLock};
 
-use hyper::http::uri::Scheme;
 use hyper::Uri;
 
 use crate::config::UpstreamConfig;
 
-use crate::context::GatewayContext;
 use crate::error::ConfigError;
 use crate::forwarder::HttpClient;
 use crate::health::{HealthConfig, Healthiness};
-use crate::http::HyperRequest;
 use crate::load_balance::*;
-use crate::runtime::Endpoint;
+use crate::registry::Endpoint;
 
 pub type UpstreamMap = HashMap<String, Arc<RwLock<Upstream>>>;
 

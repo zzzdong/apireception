@@ -59,7 +59,7 @@ pub struct TlsConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct Registry {
+pub struct RegistryConfig {
     #[serde(default)]
     pub routes: Vec<RouteConfig>,
     #[serde(default)]
@@ -75,13 +75,13 @@ pub enum RegistryProvider {
 }
 
 impl RegistryProvider {
-    pub fn load_registry(&self) -> Result<Registry, ConfigError> {
+    pub fn load_registry(&self) -> Result<RegistryConfig, ConfigError> {
         // TODO
         match self {
             RegistryProvider::Etcd(cfg) => {
                 unimplemented!()
             }
-            RegistryProvider::File(cfg) => Registry::load_file(&cfg.path),
+            RegistryProvider::File(cfg) => RegistryConfig::load_file(&cfg.path),
         }
     }
 }
@@ -148,41 +148,7 @@ pub struct EndpointConfig {
     pub weight: u32,
 }
 
-impl Registry {
-    pub fn build_router(&self) -> Result<PathRouter, ConfigError> {
-        let mut router = PathRouter::new();
-
-        let upstream_set: HashSet<&str> =
-            HashSet::from_iter(self.upstreams.iter().map(|up| up.id.as_str()));
-
-        for r in &self.routes {
-            upstream_set
-                .get(r.upstream_id.as_str())
-                .ok_or_else(|| upstream_not_found(&r.upstream_id))?;
-
-            let route = Route::new(r)?;
-
-            for uri in &r.uris {
-                let endpoint = router.at_or_default(uri);
-                endpoint.push(route.clone());
-                endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
-            }
-        }
-
-        Ok(router)
-    }
-
-    pub fn build_upstream_map(&self) -> Result<UpstreamMap, ConfigError> {
-        let mut upstreams: UpstreamMap = HashMap::new();
-
-        for u in &self.upstreams {
-            let upstream = Upstream::new(u)?;
-            upstreams.insert(u.name.clone(), Arc::new(RwLock::new(upstream)));
-        }
-
-        Ok(upstreams)
-    }
-
+impl RegistryConfig {
     // pub async fn load_db(&mut self, db: Database) -> Result<(), ConfigError> {
     //     // load routes
     //     let routes_col = db.collection::<RouteConfig>(COL_ROUTES);
@@ -221,7 +187,7 @@ impl Registry {
     //     Ok(())
     // }
 
-    pub fn load_file(path: impl AsRef<Path>) -> Result<Registry, ConfigError> {
+    pub fn load_file(path: impl AsRef<Path>) -> Result<RegistryConfig, ConfigError> {
         let path = path.as_ref();
         let ext = path
             .extension()
@@ -419,7 +385,7 @@ mod test {
 
         dump_file(&cfg, "config/config.yaml").unwrap();
 
-        let registry = Registry {
+        let registry = RegistryConfig {
             routes: vec![
                 RouteConfig {
                     id: "hello".to_string(),

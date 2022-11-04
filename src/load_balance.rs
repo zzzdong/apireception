@@ -134,7 +134,7 @@ impl LoadBalanceStrategy for LeastRequest {
 mod test {
     use hyper::http::uri::Scheme;
 
-    use crate::runtime::Endpoint;
+    use crate::registry::Endpoint;
 
     use super::*;
 

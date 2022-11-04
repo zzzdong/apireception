@@ -19,7 +19,7 @@ pub struct ScriptConfig {
 
 pub(crate) struct ScriptPlugin {
     unit: Arc<Unit>,
-    runtime: Arc<RuntimeContext>,
+    registry: Arc<RuntimeContext>,
 }
 
 impl ScriptPlugin {
@@ -30,7 +30,7 @@ impl ScriptPlugin {
         let m = build_module().unwrap();
         context.install(&m).unwrap();
 
-        let runtime = Arc::new(context.runtime());
+        let registry = Arc::new(context.runtime());
 
         let mut sources = rune::Sources::new();
         sources.insert(rune::Source::new("entry", &cfg.script));
@@ -50,7 +50,7 @@ impl ScriptPlugin {
 
         Ok(ScriptPlugin {
             unit: Arc::new(unit),
-            runtime,
+            registry,
         })
     }
 }
@@ -65,7 +65,7 @@ impl Plugin for ScriptPlugin {
         ctx: &mut crate::context::GatewayContext,
         req: crate::http::HyperRequest,
     ) -> Result<crate::http::HyperRequest, crate::http::HyperResponse> {
-        let mut vm = Vm::new(self.runtime.clone(), self.unit.clone());
+        let mut vm = Vm::new(self.registry.clone(), self.unit.clone());
 
         let output = vm
             .call(&["on_access"], (MyRequest { inner: req },))

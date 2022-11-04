@@ -12,8 +12,8 @@ use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Re
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::config::Registry;
-use crate::runtime::{RuntimeConfig, SharedData};
+use crate::server::ServerContext;
+use crate::{config::RegistryConfig, registry::Registry};
 
 use self::{
     route::RouteApi,
@@ -30,9 +30,9 @@ type ApiResult<T> = Result<ApiResponse<T>, Status>;
 
 #[derive(Clone)]
 pub struct AppContext {
-    registry: Arc<RwLock<Registry>>,
+    registry_cfg: Arc<RwLock<RegistryConfig>>,
     registry_notify: Arc<Notify>,
-    shared_data: SharedData,
+    registry: Registry,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,27 +84,27 @@ impl<T: Serialize> From<T> for ApiResponse<T> {
 }
 
 pub struct AdminApi {
-    rtcfg: RuntimeConfig,
+    rtcfg: ServerContext,
 }
 
 impl AdminApi {
-    pub fn new(rtcfg: RuntimeConfig) -> Self {
+    pub fn new(rtcfg: ServerContext) -> Self {
         AdminApi { rtcfg }
     }
 
     pub async fn run(self, addr: SocketAddr) -> Result<(), Error> {
-        let RuntimeConfig {
-            registry: config,
-            shared_data,
+        let ServerContext {
+            registry_cfg,
+            registry,
             config_notify,
             watch,
             ..
         } = self.rtcfg;
 
         let app_ctx = AppContext {
-            registry: config,
+            registry_cfg,
             registry_notify: config_notify,
-            shared_data,
+            registry,
         };
 
         let mut app = lieweb::App::with_state(app_ctx);

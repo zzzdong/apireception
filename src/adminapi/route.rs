@@ -11,7 +11,7 @@ impl RouteApi {
     pub async fn get_detail(app_ctx: ApiCtx, param: ApiParam) -> ApiResult<RouteConfig> {
         let route_id = &param.value().id;
 
-        let config = app_ctx.registry.read().unwrap();
+        let config = app_ctx.registry_cfg.read().unwrap();
 
         let route = config
             .routes
@@ -24,7 +24,7 @@ impl RouteApi {
     }
 
     pub async fn get_list(app_ctx: ApiCtx) -> ApiResult<Vec<RouteConfig>> {
-        let config = app_ctx.registry.read().unwrap();
+        let config = app_ctx.registry_cfg.read().unwrap();
 
         Ok(config.routes.clone().into())
     }
@@ -32,7 +32,7 @@ impl RouteApi {
     pub async fn add(app_ctx: ApiCtx, route: RouteCfg) -> ApiResult<RouteConfig> {
         let route: RouteConfig = route.take();
 
-        let mut config = app_ctx.registry.write().unwrap();
+        let mut config = app_ctx.registry_cfg.write().unwrap();
 
         if config.routes.iter().any(|r| r.id == route.id) {
             return Err(Status::bad_request("Route Id exist"));
@@ -55,7 +55,7 @@ impl RouteApi {
 
         route.id = route_id;
 
-        let mut config = app_ctx.registry.write().unwrap();
+        let mut config = app_ctx.registry_cfg.write().unwrap();
 
         match config.routes.iter_mut().find(|r| r.id == route.id) {
             Some(r) => {

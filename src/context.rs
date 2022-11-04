@@ -4,7 +4,7 @@ use hyper::http::{uri::Scheme, Extensions};
 use hyper::Uri;
 
 use crate::http::*;
-use crate::runtime::Endpoint;
+use crate::registry::Endpoint;
 
 #[derive(Debug)]
 pub struct GatewayContext {

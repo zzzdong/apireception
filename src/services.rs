@@ -18,26 +18,26 @@ use crate::{
     http::{
         not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, ResponseFuture,
     },
-    runtime::Endpoint,
+    registry::Endpoint,
 };
 use crate::{
     forwarder::Fowarder,
     http::bad_gateway,
     peer_addr::PeerAddr,
     router::{PathRouter, Route},
-    runtime::SharedData,
+    registry::Registry,
     upstream::Upstream,
 };
 
 #[derive(Clone)]
 pub struct GatewayService {
-    shared_data: SharedData,
+    shared_data: Registry,
     remote_addr: Option<SocketAddr>,
     scheme: Scheme,
 }
 
 impl GatewayService {
-    pub fn new(shared_data: SharedData, remote_addr: Option<SocketAddr>, scheme: Scheme) -> Self {
+    pub fn new(shared_data: Registry, remote_addr: Option<SocketAddr>, scheme: Scheme) -> Self {
         GatewayService {
             shared_data,
             remote_addr,
@@ -163,12 +163,12 @@ pub struct ConnService {
     scheme: Scheme,
     server: HttpServer,
     drain: drain::Watch,
-    shared_data: SharedData,
+    shared_data: Registry,
 }
 
 impl ConnService {
     pub fn new(
-        shared_data: SharedData,
+        shared_data: Registry,
         scheme: Scheme,
         server: HttpServer,
         drain: drain::Watch,

@@ -10,7 +10,7 @@ mod matcher;
 mod peer_addr;
 mod plugins;
 mod router;
-mod runtime;
+mod registry;
 mod server;
 mod services;
 mod trace;
@@ -23,7 +23,7 @@ pub use error::{Error, Result};
 use hyper::http::uri::Scheme;
 use server::Server;
 
-use crate::{adminapi::AdminApi, runtime::RuntimeConfig};
+use crate::{adminapi::AdminApi, server::ServerContext};
 
 #[tokio::main]
 async fn main() {
@@ -45,7 +45,7 @@ async fn run() -> Result<()> {
     tracing::debug!(?cfg, "load config done");
 
     let (drain_tx, drain_rx) = drain::channel();
-    let rtcfg = RuntimeConfig::new(cfg, drain_rx).await?;
+    let rtcfg = ServerContext::new(cfg, drain_rx).await?;
 
     rtcfg.start_watch_config();
 
@@ -53,7 +53,7 @@ async fn run() -> Result<()> {
 
     // Serve HTTP
     tokio::spawn(async move {
-        let srv = Server::new(Scheme::HTTP, rtcfg_cloned.shared_data);
+        let srv = Server::new(Scheme::HTTP, rtcfg_cloned.registry);
         let ret = srv.run(rtcfg_cloned.http_addr, rtcfg_cloned.watch).await;
 
         match ret {

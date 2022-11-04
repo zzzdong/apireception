@@ -10,7 +10,7 @@ use hyper_timeout::TimeoutConnector;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::{runtime::SharedData, upstream::Upstream};
+use crate::{registry::Registry, upstream::Upstream};
 
 type HttpClient = Client<TimeoutConnector<HttpsConnector<HttpConnector>>, hyper::Body>;
 
@@ -30,7 +30,7 @@ pub struct HealthConfig {
 }
 
 struct HealthChecker {
-    shared_data: SharedData,
+    shared_data: Registry,
 }
 
 struct UpstreamChecker {
