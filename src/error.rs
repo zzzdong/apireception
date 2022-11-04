@@ -30,6 +30,8 @@ pub enum ConfigError {
     UriParse(#[from] hyper::http::uri::InvalidUri),
     #[error("parse match error")]
     MatcherParse(#[from] MatcherParseError),
+    #[error("etcd client error")]
+    EtcdClient(#[from] etcdv3client::Error),
     #[error("{0}")]
     Message(String),
     #[error("upstream<{0}> not found")]

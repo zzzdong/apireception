@@ -69,7 +69,7 @@ impl Default for RegistryProvider {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct EtcdProvider {
-    pub host: String,
+    pub endpoint: Vec<String>,
     pub username: String,
     pub password: String,
 }

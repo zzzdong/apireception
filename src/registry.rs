@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use crate::{
-    config::{RegistryProvider, RouteConfig, UpstreamConfig},
+    config::{EtcdProvider, RegistryProvider, RouteConfig, UpstreamConfig},
     error::{upstream_not_found, ConfigError},
     router::{PathRouter, Route},
     upstream::{Upstream, UpstreamMap},
@@ -41,11 +41,19 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
+    pub fn new() -> Self {
+        RegistryConfig {
+            routes: Vec::new(),
+            upstreams: Vec::new(),
+        }
+    }
+
     fn load(provider: &RegistryProvider) -> Result<Self, ConfigError> {
         match provider {
-            RegistryProvider::Etcd(cfg) => {
-                unimplemented!()
-            }
+            RegistryProvider::Etcd(cfg) => tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current()
+                    .block_on(async move { Self::load_etcd(cfg.clone()).await })
+            }),
             RegistryProvider::File(cfg) => RegistryConfig::load_file(&cfg.path),
         }
     }
@@ -87,6 +95,31 @@ impl RegistryConfig {
 
     //     Ok(())
     // }
+
+    pub async fn load_etcd(cfg: EtcdProvider) -> Result<RegistryConfig, ConfigError> {
+        let cred = if !cfg.password.is_empty() {
+            Some((cfg.username, cfg.password))
+        } else {
+            None
+        };
+
+        let mut client = etcdv3client::Client::new(cfg.endpoint, cred).await?;
+
+        let mut cfg = RegistryConfig::new();
+
+        for kv in client.get_with_prefix("/apirection/").await? {
+            let key = String::from_utf8_lossy(&kv.key);
+            if key.starts_with("/apirection/routes/") {
+                let route: RouteConfig = serde_json::from_slice(&kv.value)?;
+                cfg.routes.push(route);
+            } else if key.starts_with("/apirection/upstreams/") {
+                let upstream: UpstreamConfig = serde_json::from_slice(&kv.value)?;
+                cfg.upstreams.push(upstream);
+            }
+        }
+
+        Ok(cfg)
+    }
 
     pub fn load_file(path: impl AsRef<Path>) -> Result<RegistryConfig, ConfigError> {
         crate::config::load_file(path)
@@ -162,7 +195,49 @@ impl Registry {
         Ok(upstreams)
     }
 
-    pub fn start_watch_registry(provider: RegistryProvider) {}
+    pub fn start_watch_registry(provider: RegistryProvider, registry: Registry) {
+        tokio::spawn(async move {
+            match provider {
+                RegistryProvider::Etcd(cfg) => {}
+                _ => {}
+            }
+        });
+    }
+
+    async fn watch_etcd_registry(cfg: EtcdProvider, registry: Registry) -> Result<(), ConfigError> {
+        let cred = if !cfg.password.is_empty() {
+            Some((cfg.username, cfg.password))
+        } else {
+            None
+        };
+
+        let mut client = etcdv3client::Client::new(cfg.endpoint, cred).await?;
+
+        let mut cfg = RegistryConfig::new();
+
+        let mut watcher = client.watch("/apirection/").await?;
+
+        loop {
+            let m = watcher.message().await?;
+            {
+                if let Some(msg) = m {
+                    for ev in msg.events {
+                        let kv = ev.kv.unwrap();
+                        let key = String::from_utf8_lossy(&kv.key);
+                        if key.starts_with("/apirection/routes/") {
+                            let route: RouteConfig = serde_json::from_slice(&kv.value)?;
+                            cfg.routes.push(route);
+                        } else if key.starts_with("/apirection/upstreams/") {
+                            let upstream: UpstreamConfig = serde_json::from_slice(&kv.value)?;
+                            cfg.upstreams.push(upstream);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 
     pub fn start_watch_notify(&self, notify: Arc<Notify>) {
         let config = self.config.clone();
