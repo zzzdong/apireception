@@ -6,7 +6,7 @@ use crate::error::ConfigError;
 use crate::matcher::RouteMatcher;
 use crate::plugins::{init_plugin, Plugin};
 
-pub type PathRouter = route_recognizer::Router<Vec<Route>>;
+pub type PathRouter = pathrouter::Router<Vec<Route>>;
 
 #[derive(Clone)]
 pub struct Route {
@@ -20,6 +20,10 @@ pub struct Route {
 
 impl Route {
     pub fn new(cfg: &RouteConfig) -> Result<Route, ConfigError> {
+        if cfg.upstream_id.is_empty() {
+            return Err(ConfigError::UpstreamNotFound("UpstreamId missing".to_string()));
+        }
+
         let matcher = RouteMatcher::parse(&cfg.matcher)?;
 
         let mut plugins = Vec::new();

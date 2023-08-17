@@ -11,7 +11,7 @@ impl UpstreamApi {
     pub async fn get_detail(app_ctx: ApiCtx, param: ApiParam) -> ApiResult<UpstreamConfig> {
         let upstream_id = &param.value().id;
 
-        let config = app_ctx.registry.config.read().unwrap();
+        let config = app_ctx.registry_reader.get();
 
         let upstream = config
             .upstreams

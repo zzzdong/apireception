@@ -1,0 +1,19 @@
+---
+server:
+  log_level: debug
+  http_addr: "0.0.0.0:8080"
+  https_addr: "0.0.0.0:8443"
+  tls_config:
+    www.example.com:
+      cert_path: example.cert
+      key_path: example.key
+admin:
+  enable: false
+  adminapi_addr: "127.0.0.1:8000"
+  users:
+    - username: admin
+      password: admin
+
+registry_provider: !file
+    path: config/apireception.yaml
+    auto_reload: true

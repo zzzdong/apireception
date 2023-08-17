@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use drain::Watch;
 use hyper::http::uri::Scheme;
@@ -8,13 +8,12 @@ use hyper::server::conn::Http;
 use tokio::net::TcpListener;
 use tokio::sync::Notify;
 use tokio_rustls::rustls::sign::CertifiedKey;
-use tokio_rustls::webpki::DnsName;
 use tower::Service;
 use tracing::Instrument;
 
 use crate::config::Config;
 use crate::error::ConfigError;
-use crate::registry::Registry;
+use crate::registry::{Registry, RegistryReader, RegistryWriter, RegistryConfig};
 use crate::services::ConnService;
 use crate::trace::TraceExecutor;
 
@@ -23,9 +22,10 @@ pub struct ServerContext {
     pub http_addr: SocketAddr,
     pub https_addr: SocketAddr,
     pub adminapi_addr: Option<SocketAddr>,
-    pub certificates: Arc<HashMap<DnsName, CertifiedKey>>,
+    pub certificates: Arc<HashMap<String, CertifiedKey>>,
     pub registry: Registry,
-
+    pub registry_writer: Arc<Mutex<RegistryWriter>>,
+    pub registry_reader: RegistryReader,
     pub registry_notify: Arc<Notify>,
     pub watch: Watch,
 
@@ -43,11 +43,17 @@ impl ServerContext {
         };
 
         // load registry
-        let registry = Registry::new(&cfg.registry_provider)?;
+        let registry = Registry::new(&cfg.registry_provider)?; // check registry conf
+        let (registry_reader, mut registry_writer) = Registry::new_reader_writer();
+        let registry_config = RegistryConfig::load(&cfg.registry_provider)?;
+        registry_writer.load_config(registry_config);
+        registry_writer.publish();
 
         let certificates = Arc::new(HashMap::new());
         let registry_notify = Arc::new(Notify::new());
         let config = Arc::new(cfg);
+
+
 
         Ok(ServerContext {
             http_addr,
@@ -56,34 +62,36 @@ impl ServerContext {
             registry,
             certificates,
             config,
+            registry_reader,
+            registry_writer: Arc::new(Mutex::new(registry_writer)),
             registry_notify,
             watch,
         })
     }
 
-    pub fn start_watch_registry(&self) {
-        self.registry
-            .start_watch_notify(self.registry_notify.clone());
-    }
+    // pub fn start_watch_registry(&self) {
+    //     self.registry
+    //         .start_watch_notify(self.registry_notify.clone());
+    // }
 }
 
 pub struct Server {
     scheme: Scheme,
-    shared_data: Registry,
+    registry_reader: RegistryReader,
 }
 
 impl Server {
-    pub fn new(scheme: Scheme, shared_data: Registry) -> Self {
+    pub fn new(scheme: Scheme, registry_reader: RegistryReader) -> Self {
         Server {
             scheme,
-            shared_data,
+            registry_reader,
         }
     }
 
     pub async fn run(self, addr: SocketAddr, watch: Watch) -> crate::Result<()> {
         let Server {
             scheme,
-            shared_data,
+            registry_reader,
         } = self;
 
         let http = Http::new().with_executor(TraceExecutor::new());
@@ -92,7 +100,7 @@ impl Server {
 
         tracing::info!("server listen on {:?}", addr);
 
-        let conn_svc = ConnService::new(shared_data, scheme, http, watch.clone());
+        let conn_svc = ConnService::new(registry_reader, scheme, http, watch.clone());
 
         loop {
             tokio::select! {

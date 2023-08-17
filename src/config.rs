@@ -282,7 +282,7 @@ mod test {
             registry_provider: RegistryProvider::default(),
         };
 
-        dump_file(&cfg, "config/config.yaml").unwrap();
+        dump_file(&cfg, "config2/config.yaml").unwrap();
 
         let registry = RegistryConfig {
             routes: vec![
@@ -334,7 +334,7 @@ mod test {
             ],
         };
 
-        dump_file(&registry, "config/apireception.yaml").unwrap();
+        dump_file(&registry, "config2/apireception.yaml").unwrap();
     }
 
     // #[tokio::test]

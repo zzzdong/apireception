@@ -7,9 +7,8 @@ use std::{
     time::SystemTime,
 };
 
-use arc_swap::ArcSwap;
-
 use hyper::Uri;
+use left_right::{Absorb, ReadHandle, WriteHandle, ReadGuard};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
@@ -41,7 +40,7 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
-    fn load(provider: &RegistryProvider) -> Result<Self, ConfigError> {
+    pub fn load(provider: &RegistryProvider) -> Result<Self, ConfigError> {
         match provider {
             RegistryProvider::Etcd(cfg) => {
                 unimplemented!()
@@ -97,34 +96,85 @@ impl RegistryConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Registry {
-    pub config: Arc<RwLock<RegistryConfig>>,
-    pub router: Arc<ArcSwap<PathRouter>>,
-    pub upstreams: Arc<ArcSwap<UpstreamMap>>,
+    pub config: RegistryConfig,
+    pub router: PathRouter,
+    pub upstreams: UpstreamMap,
 }
 
 impl Registry {
     pub fn new(provider: &RegistryProvider) -> Result<Self, ConfigError> {
-        let cfg = RegistryConfig::load(provider)?;
+        let config = RegistryConfig::load(provider)?;
 
-        let router = Self::build_router(&cfg)?;
-        let upstreams = Self::build_upstream_map(&cfg)?;
+        let router = Self::build_router(&config)?;
+        let upstreams = Self::build_upstream_map(&config)?;
 
         Ok(Registry {
-            config: Arc::new(RwLock::new(cfg)),
-            router: Arc::new(ArcSwap::new(Arc::new(router))),
-            upstreams: Arc::new(ArcSwap::new(Arc::new(upstreams))),
+            config,
+            router,
+            upstreams,
         })
     }
 
-    pub fn reload(&self, cfg: &RegistryConfig) -> Result<(), ConfigError> {
-        let router = Self::build_router(cfg)?;
-        let upstreams = Self::build_upstream_map(cfg)?;
+    pub(crate) fn new_reader_writer() -> (RegistryReader, RegistryWriter) {
+        let (write, read) = left_right::new::<Registry, RegistryOp>();
 
-        self.router.store(Arc::new(router));
-        self.upstreams.store(Arc::new(upstreams));
+        (RegistryReader(read), RegistryWriter(write))
+    }
 
+    pub fn reload(&mut self, cfg: RegistryConfig) -> Result<(), ConfigError> {
+        let router = Self::build_router(&cfg)?;
+        let upstreams = Self::build_upstream_map(&cfg)?;
+
+        self.config = cfg;
+        self.router = router;
+        self.upstreams = upstreams;
+
+        Ok(())
+    }
+
+    pub fn add_route(&mut self, cfg: &RouteConfig) -> Result<(), ConfigError> {
+        let route = Route::new(cfg)?;
+
+        // check upstream
+        self.upstreams
+            .values()
+            .find(|item| item.read().unwrap().id == route.upstream_id)
+            .ok_or(ConfigError::UpstreamNotFound(route.upstream_id.clone()))?;
+
+        for uri in &cfg.uris {
+            let endpoint = self.router.at_or_default(uri);
+            endpoint.push(route.clone());
+            endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
+        }
+
+        Ok(())
+    }
+
+    pub fn delete_route(&mut self, cfg: &RouteConfig) -> Result<(), ConfigError> {
+        let route = Route::new(cfg)?;
+
+        for uri in &cfg.uris {
+            let endpoint = self.router.at_or_default(uri);
+
+            endpoint.retain(|item| item.id != route.id);
+            endpoint.sort_unstable_by_key(|r| Reverse(r.priority))
+        }
+
+        Ok(())
+    }
+
+    pub fn add_upstream(&mut self, cfg: &UpstreamConfig) -> Result<(), ConfigError> {
+        let upstream = Upstream::new(cfg)?;
+
+        self.upstreams
+            .insert(upstream.id.clone(), Arc::new(RwLock::new(upstream)));
+        Ok(())
+    }
+
+    pub fn delete_upstream(&mut self, upstream: &UpstreamConfig) -> Result<(), ConfigError> {
+        self.upstreams.remove(&upstream.id);
         Ok(())
     }
 
@@ -162,24 +212,24 @@ impl Registry {
         Ok(upstreams)
     }
 
-    pub fn start_watch_registry(provider: RegistryProvider) {}
 
-    pub fn start_watch_notify(&self, notify: Arc<Notify>) {
-        let config = self.config.clone();
-        let registry = self.clone();
 
-        tokio::spawn(async move {
-            loop {
-                notify.notified().await;
+    // pub fn start_watch_notify(&self, notify: Arc<Notify>) {
+    //     let config = self.config.clone();
+    //     let registry = self.clone();
 
-                Self::apply_config(config.clone(), registry.clone());
-            }
-        });
-    }
+    //     tokio::spawn(async move {
+    //         loop {
+    //             notify.notified().await;
 
-    fn apply_config(cfg: Arc<RwLock<RegistryConfig>>, registry: Registry) {
+    //             Self::apply_config(config.clone(), registry.clone());
+    //         }
+    //     });
+    // }
+
+    fn apply_config(cfg: Arc<RwLock<RegistryConfig>>, mut registry: Registry) {
         let cfg = cfg.read().unwrap();
-        match registry.reload(&cfg) {
+        match registry.reload(cfg.clone()) {
             Ok(_) => {
                 let mut path = std::env::temp_dir();
                 let now = SystemTime::now()
@@ -199,3 +249,67 @@ impl Registry {
         }
     }
 }
+
+#[derive(Debug)]
+pub enum RegistryOp {
+    Reload(RegistryConfig),
+    AddRoute(RouteConfig),
+    DeleteRoute(RouteConfig),
+    AddUpstream(UpstreamConfig),
+    DeleteUpstream(UpstreamConfig),
+}
+
+impl Absorb<RegistryOp> for Registry {
+    fn absorb_first(&mut self, operation: &mut RegistryOp, other: &Self) {
+        match operation {
+            RegistryOp::Reload(cfg) => {
+                self.reload(cfg.clone());
+            }
+            RegistryOp::AddRoute(cfg) => {
+                self.add_route(cfg);
+            }
+            RegistryOp::DeleteRoute(cfg) => {
+                self.delete_route(cfg);
+            }
+            RegistryOp::AddUpstream(cfg) => {
+                self.add_upstream(cfg);
+            }
+            RegistryOp::DeleteUpstream(cfg) => {
+                self.delete_upstream(cfg);
+            }
+        }
+    }
+
+    fn sync_with(&mut self, first: &Self) {
+        *self = first.clone();
+    }
+}
+
+
+pub struct RegistryWriter(WriteHandle<Registry, RegistryOp>);
+
+impl RegistryWriter {
+    pub fn load_config(&mut self, conf: RegistryConfig) {
+        self.0.append(RegistryOp::Reload(conf));
+    }
+
+
+    pub fn publish(&mut self) {
+        self.0.publish();
+    }
+}
+
+#[derive(Clone)]
+pub struct RegistryReader(ReadHandle<Registry>);
+
+impl RegistryReader {
+    pub fn get(&self) -> ReadGuard<Registry> {
+        self.0.enter().expect("get failed")
+    }
+
+    // pub fn get_config(&self) -> &RegistryConfig {
+    //     self.0.enter().map(|guard| &guard.config).expect("get failed")
+    // }
+}
+
+

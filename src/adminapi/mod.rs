@@ -5,14 +5,14 @@ mod upstream;
 
 use std::{
     net::SocketAddr,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, Mutex},
 };
 
 use lieweb::{response::IntoResponse, AppState, Error, LieResponse, PathParam, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
-use crate::registry::Registry;
+use crate::registry::{Registry, RegistryWriter, RegistryReader};
 use crate::{registry::RegistryConfig, server::ServerContext};
 
 use self::{
@@ -30,7 +30,8 @@ type ApiResult<T> = Result<ApiResponse<T>, Status>;
 
 #[derive(Clone)]
 pub struct AppContext {
-    registry: Registry,
+    registry_writer: Arc<Mutex<RegistryWriter>>,
+    registry_reader: RegistryReader,
     registry_notify: Arc<Notify>,
 }
 

@@ -15,6 +15,7 @@ use crate::registry::Endpoint;
 pub type UpstreamMap = HashMap<String, Arc<RwLock<Upstream>>>;
 
 pub struct Upstream {
+    pub id: String,
     pub name: String,
     pub client: HttpClient,
     pub strategy: Arc<Box<dyn LoadBalanceStrategy>>,
@@ -45,6 +46,7 @@ impl Upstream {
         let client = HttpClient::new();
 
         Ok(Upstream {
+            id: cfg.id.clone(),
             name: cfg.name.clone(),
             endpoints,
             client,

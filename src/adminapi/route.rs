@@ -11,7 +11,7 @@ impl RouteApi {
     pub async fn get_detail(app_ctx: ApiCtx, param: ApiParam) -> ApiResult<RouteConfig> {
         let route_id = &param.value().id;
 
-        let config = app_ctx.registry.config.read().unwrap();
+        let config = app_ctx.registry_reader.get().config;
 
         let route = config
             .routes
@@ -24,7 +24,7 @@ impl RouteApi {
     }
 
     pub async fn get_list(app_ctx: ApiCtx) -> ApiResult<Vec<RouteConfig>> {
-        let config = app_ctx.registry.config.read().unwrap();
+        let config = app_ctx.registry_reader.get().config;
 
         Ok(config.routes.clone().into())
     }

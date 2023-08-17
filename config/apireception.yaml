@@ -1,0 +1,63 @@
+routes:
+  - id: hello
+    name: hello
+    desc: ""
+    uris:
+      - /hello
+    upstream_id: upstream-001
+    matcher: ""
+    priority: 0
+    plugins: {}
+  - id: hello-to-tom
+    name: hello-to-tom
+    desc: ""
+    uris:
+      - /hello/*
+    upstream_id: upstream-002
+    matcher: "Query('name', 'tom')"
+    priority: 100
+    plugins:
+      path_rewrite:
+        enable: true
+        regex_replace:
+          - /hello/(.*)
+          - /$1
+      traffic_split:
+        enable: true
+        rules:
+          - matcher: "PathRegexp('/hello/world/\\(.*\\)')"
+            upstream_id: hello-to-tom
+upstreams:
+  - id: upstream-001
+    name: upstream-001
+    desc: ""
+    endpoints:
+      - addr: "127.0.0.1:5000"
+        weight: 1
+    strategy: random
+    is_https: false
+    health_check:
+      timeout: 0
+      interval: 0
+      path: ""
+      status_regex: "200"
+      rise: 1
+      fall: 3
+      default_down: false
+  - id: upstream-002
+    name: upstream-002
+    desc: ""
+    endpoints:
+      - addr: "127.0.0.1:5000"
+        weight: 1
+    strategy: weighted
+    is_https: false
+    health_check:
+      timeout: 0
+      interval: 1
+      path: ""
+      status_regex: "200"
+      rise: 1
+      fall: 3
+      default_down: false
+      

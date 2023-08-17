@@ -17,43 +17,45 @@ use crate::{
     http::{
         not_found, upstream_unavailable, HttpServer, HyperRequest, HyperResponse, ResponseFuture,
     },
-    registry::Endpoint,
+    registry::{Endpoint, RegistryReader},
 };
 use crate::{
     forwarder::Fowarder,
     http::bad_gateway,
     peer_addr::PeerAddr,
-    registry::Registry,
     router::{PathRouter, Route},
     upstream::Upstream,
 };
 
 #[derive(Clone)]
 pub struct GatewayService {
-    shared_data: Registry,
+    registry_reader: RegistryReader,
     remote_addr: Option<SocketAddr>,
     scheme: Scheme,
 }
 
 impl GatewayService {
-    pub fn new(shared_data: Registry, remote_addr: Option<SocketAddr>, scheme: Scheme) -> Self {
+    pub fn new(
+        registry_reader: RegistryReader,
+        remote_addr: Option<SocketAddr>,
+        scheme: Scheme,
+    ) -> Self {
         GatewayService {
-            shared_data,
+            registry_reader,
             remote_addr,
             scheme,
         }
     }
 
     pub fn find_route<'a>(router: &'a PathRouter, req: &HyperRequest) -> Option<&'a Route> {
-        match router.recognize(req.uri().path()) {
-            Ok(m) => {
-                let routes = *m.handler();
-
-                let routes: Vec<&Route> = routes.iter().filter(|r| r.matcher.matchs(req)).collect();
+        match router.route(req.uri().path()) {
+            Some((endpoint, _params)) => {
+                let routes: Vec<&Route> =
+                    endpoint.iter().filter(|r| r.matcher.matchs(req)).collect();
 
                 routes.first().cloned()
             }
-            Err(_err) => {
+            None => {
                 debug!("route not found");
                 None
             }
@@ -142,8 +144,8 @@ impl Service<HyperRequest> for GatewayService {
 
         let ctx = GatewayContext::new(self.remote_addr, self.scheme.clone(), &req);
 
-        let router = self.shared_data.router.load().clone();
-        let upstreams = self.shared_data.upstreams.load().clone();
+        let router = self.registry_reader.get().router.clone();
+        let upstreams = self.registry_reader.get().upstreams.clone();
 
         Box::pin(async move {
             let found = Self::find_route(&router, &req);
@@ -162,12 +164,12 @@ pub struct ConnService {
     scheme: Scheme,
     server: HttpServer,
     drain: drain::Watch,
-    shared_data: Registry,
+    registry_reader: RegistryReader,
 }
 
 impl ConnService {
     pub fn new(
-        shared_data: Registry,
+        registry_reader: RegistryReader,
         scheme: Scheme,
         server: HttpServer,
         drain: drain::Watch,
@@ -176,7 +178,7 @@ impl ConnService {
             scheme,
             server,
             drain,
-            shared_data,
+            registry_reader,
         }
     }
 }
@@ -195,7 +197,7 @@ where
 
     fn call(&mut self, io: I) -> Self::Future {
         let Self {
-            shared_data,
+            registry_reader,
             server,
             scheme,
             drain,
@@ -203,7 +205,7 @@ where
 
         let remote_addr = io.peer_addr().ok();
 
-        let svc = GatewayService::new(shared_data, remote_addr, scheme);
+        let svc = GatewayService::new(registry_reader, remote_addr, scheme);
 
         Box::pin(async move {
             let mut conn = server.serve_connection(io, svc);

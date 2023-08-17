@@ -1,4 +1,4 @@
-mod adminapi;
+// mod adminapi;
 mod config;
 mod context;
 mod error;
@@ -23,7 +23,7 @@ pub use error::{Error, Result};
 use hyper::http::uri::Scheme;
 use server::Server;
 
-use crate::{adminapi::AdminApi, server::ServerContext};
+use crate::server::ServerContext;
 
 #[tokio::main]
 async fn main() {
@@ -45,16 +45,18 @@ async fn run() -> Result<()> {
     tracing::debug!(?cfg, "load config done");
 
     let (drain_tx, drain_rx) = drain::channel();
-    let rtcfg = ServerContext::new(cfg, drain_rx).await?;
+    let srv_ctx = ServerContext::new(cfg, drain_rx).await?;
 
-    rtcfg.start_watch_registry();
+    // srv_ctx.start_watch_registry();
 
-    let rtcfg_cloned = rtcfg.clone();
+    let srv_ctx_cloned = srv_ctx.clone();
 
     // Serve HTTP
     tokio::spawn(async move {
-        let srv = Server::new(Scheme::HTTP, rtcfg_cloned.registry);
-        let ret = srv.run(rtcfg_cloned.http_addr, rtcfg_cloned.watch).await;
+        let srv = Server::new(Scheme::HTTP, srv_ctx_cloned.registry_reader);
+        let ret = srv
+            .run(srv_ctx_cloned.http_addr, srv_ctx_cloned.watch)
+            .await;
 
         match ret {
             Ok(_) => {
@@ -68,27 +70,27 @@ async fn run() -> Result<()> {
     });
 
     // TODO: add serve https
-    let rtcfg_cloned = rtcfg.clone();
+    // let srv_ctx_cloned = srv_ctx.clone();
 
-    if rtcfg_cloned.config.admin.enable {
-        let adminapi_addr = rtcfg.adminapi_addr.unwrap();
-        tokio::spawn(async move {
-            let adminapi = AdminApi::new(rtcfg_cloned);
-            match adminapi.run(adminapi_addr).await {
-                Ok(_) => {
-                    tracing::info!("adminapi server done");
-                }
-                Err(err) => {
-                    tracing::error!(?err, "adminapi server error");
-                }
-            }
-        });
-    }
+    // if srv_ctx_cloned.config.admin.enable {
+    //     let adminapi_addr = srv_ctx.adminapi_addr.unwrap();
+    //     tokio::spawn(async move {
+    //         let adminapi = AdminApi::new(srv_ctx_cloned);
+    //         match adminapi.run(adminapi_addr).await {
+    //             Ok(_) => {
+    //                 tracing::info!("adminapi server done");
+    //             }
+    //             Err(err) => {
+    //                 tracing::error!(?err, "adminapi server error");
+    //             }
+    //         }
+    //     });
+    // }
 
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             println!("got ctrl_c, shutting down...");
-            let _shutdown = rtcfg.watch.ignore_signaled();
+            let _shutdown = srv_ctx.watch.ignore_signaled();
         }
     }
 
